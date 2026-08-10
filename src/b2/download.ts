@@ -1,7 +1,15 @@
-import { open, rename, rm, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { IncompleteWriteError, writeStreamAtomically } from '../atomic-write.js'
 import { DOWNLOAD_ROOT_VAR, resolveNewFilePath } from '../path-fence.js'
 import { BucketNotFoundError } from './files.js'
+
+/**
+ * The short-body failure, under the name this module has always used.
+ * Aliased rather than renamed so plan 005's callers and tests keep working
+ * after the write logic moved to src/atomic-write.ts.
+ */
+export { IncompleteWriteError as IncompleteDownloadError }
 
 /** What a download produced, flattened for the MCP boundary. */
 export interface DownloadReceipt {
@@ -48,14 +56,6 @@ export class DestinationExistsError extends Error {
   }
 }
 
-/** Raised when fewer bytes arrived than B2 said the file contains. */
-export class IncompleteDownloadError extends Error {
-  constructor(expected: number, actual: number) {
-    super(`Incomplete download: expected ${expected} bytes, wrote ${actual}`)
-    this.name = 'IncompleteDownloadError'
-  }
-}
-
 /** True when a path exists, without caring what it is. */
 async function exists(path: string): Promise<boolean> {
   try {
@@ -64,36 +64,6 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/**
- * Streams a body to a file, returning how many bytes landed.
- *
- * Counting here rather than trusting the stream is what makes the
- * contentLength check meaningful.
- */
-async function writeBodyToFile(
-  body: ReadableStream<Uint8Array>,
-  path: string,
-): Promise<number> {
-  const handle = await open(path, 'w')
-  let written = 0
-  try {
-    const reader = body.getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-      if (value) {
-        await handle.write(value)
-        written += value.byteLength
-      }
-    }
-  } finally {
-    await handle.close()
-  }
-  return written
 }
 
 /**
@@ -138,20 +108,7 @@ export async function downloadFile(
   }
 
   const { headers, body } = await bucket.download(options.fileName)
-  const temp = `${target}.${process.pid}.partial`
-
-  try {
-    const written = await writeBodyToFile(body, temp)
-    if (written !== headers.contentLength) {
-      throw new IncompleteDownloadError(headers.contentLength, written)
-    }
-    // Same directory, so this is an atomic move rather than a copy.
-    await rename(temp, target)
-  } catch (error) {
-    // Never leave a partial file behind for the caller to mistake for the real one.
-    await rm(temp, { force: true })
-    throw error
-  }
+  await writeStreamAtomically(body, target, headers.contentLength)
 
   return {
     fileName: headers.fileName,

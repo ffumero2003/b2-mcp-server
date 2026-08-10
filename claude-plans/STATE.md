@@ -128,3 +128,40 @@ answers "what exists and what does it do."
   refusing and honouring overwrite, a mid-stream failure leaving no file and no
   .partial, a mid-stream failure not clobbering an existing file, a short body,
   unknown bucket, SDK rejection propagates.
+
+## Plan 006 — hide, unhide, and delete a file version, with an audit trail
+
+- src/audit-log.ts — appendAuditRecord(record, env) writes append-only JSON
+  Lines; auditLogPath(env) throws AuditLogNotConfiguredError when B2_AUDIT_LOG
+  is unset, which is what makes deletion refuse. One object per line, so a
+  partial line can never destroy earlier records and the file greps without a
+  parser. JSON.stringify escapes newlines, so a crafted file name cannot forge
+  a second record. The path is deliberately NOT fenced: it is operator
+  configuration, not a caller-supplied path.
+- src/atomic-write.ts — writeStreamAtomically(body, target, expectedLength),
+  extracted from 005's downloadFile so archiving reuses it rather than growing
+  a second copy that drifts. Temp file, byte count, rename on match, cleanup on
+  any failure. IncompleteWriteError, re-exported by download.ts under its old
+  name IncompleteDownloadError.
+- src/b2/download.ts — modified: calls the extracted helper.
+- src/path-fence.ts — modified: adds ARCHIVE_ROOT_VAR.
+- src/b2/delete.ts — hideFile, unhideFile, deleteFileVersion, each returning a
+  receipt. Delete order is load-bearing: audit log resolved first (unconfigured
+  means no API call at all), then getFileInfo (impossible after deletion), then
+  archive if configured (non-destructive, so failure aborts safely), then the
+  INTENT record, then the delete, then the OUTCOME record on success or
+  failure. bypassGovernance is never sent. Archiving downloads BY ID so the
+  exact version being destroyed is what gets kept. DeleteReceipt is built from
+  pre-delete metadata because deleteVersion returns void -- it records what was
+  requested and not rejected, NOT confirmation from B2.
+- src/server.ts — modified: registers b2_hide_file, b2_unhide_file and
+  b2_delete_file_version, bringing the server to seven tools. Only the delete
+  carries destructiveHint true.
+- .env.example — modified: documents B2_AUDIT_LOG and B2_ARCHIVE_ROOT.
+- .gitignore — modified: adds archive/ and b2-audit.jsonl.
+- tests/audit-log.test.ts — 8 cases including append-preserves-earlier-content
+  and a newline in a field staying on one line.
+- tests/delete.test.ts — 16 cases including the no-audit-log refusal never
+  calling deleteVersion, a failed delete still leaving intent plus a failure
+  outcome, bypassGovernance never sent, and archiving using the fileId rather
+  than the current version. Proposed for Protected files, not appended.

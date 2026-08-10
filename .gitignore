@@ -4,3 +4,5 @@ dist/
 .env
 uploads/
 downloads/
+archive/
+b2-audit.jsonl

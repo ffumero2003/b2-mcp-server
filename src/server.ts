@@ -8,6 +8,7 @@ import { getClient } from './b2/client.js'
 import { DEFAULT_LIMIT, MAX_LIMIT, listFiles } from './b2/files.js'
 import { uploadFile } from './b2/upload.js'
 import { downloadFile } from './b2/download.js'
+import { deleteFileVersion, hideFile, unhideFile } from './b2/delete.js'
 import { loadConfig } from './config.js'
 import { loadDotEnv } from './env-file.js'
 
@@ -208,6 +209,109 @@ export function createServer(): McpServer {
           localPath,
           overwrite,
         })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_hide_file',
+    {
+      title: 'Hide a B2 file',
+      description:
+        'Hides a file so it stops appearing in b2_list_files. Reversible: the data stays in version history and b2_unhide_file restores it. Prefer this over deleting when the goal is to remove something from view.',
+      inputSchema: {
+        bucketName: z.string().min(1).describe('Bucket containing the file.'),
+        fileName: z.string().min(1).describe('Name of the file to hide.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        // The data survives in version history, so nothing is destroyed.
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async ({ bucketName, fileName }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const receipt = await hideFile(client, { bucketName, fileName })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_unhide_file',
+    {
+      title: 'Unhide a B2 file',
+      description:
+        'Removes the latest hide marker, making a hidden file visible again. If the file was not hidden, this reports restored false rather than failing.',
+      inputSchema: {
+        bucketName: z.string().min(1).describe('Bucket containing the file.'),
+        fileName: z.string().min(1).describe('Name of the file to restore.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async ({ bucketName, fileName }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const receipt = await unhideFile(client, { bucketName, fileName })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_delete_file_version',
+    {
+      title: 'Permanently delete one version of a B2 file',
+      description:
+        'PERMANENTLY destroys ONE version of a file. B2 cannot undo this, and older versions of the same name are left in place. Requires the exact fileId, which you must get from b2_list_files first: this tool will not look one up from a file name. Refused unless B2_AUDIT_LOG is configured, since every deletion is recorded. When B2_ARCHIVE_ROOT is set, a copy of the version is saved locally before it is destroyed. To remove a file from view reversibly, use b2_hide_file instead.',
+      inputSchema: {
+        bucketName: z.string().min(1).describe('Bucket containing the file.'),
+        fileName: z.string().min(1).describe('Name of the file version to delete.'),
+        fileId: z
+          .string()
+          .min(1)
+          .describe('Exact version id to destroy. Get it from b2_list_files.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        // The one tool in this server that destroys data B2 cannot return.
+        destructiveHint: true,
+        // Deleting an already-deleted version is a no-op.
+        idempotentHint: true,
+      },
+    },
+    async ({ bucketName, fileName, fileId }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const receipt = await deleteFileVersion(client, { bucketName, fileName, fileId })
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
         }

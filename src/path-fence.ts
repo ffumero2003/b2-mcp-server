@@ -8,6 +8,12 @@ export const UPLOAD_ROOT_VAR = 'B2_UPLOAD_ROOT'
 export const DOWNLOAD_ROOT_VAR = 'B2_DOWNLOAD_ROOT'
 
 /**
+ * Environment variable naming where copies of deleted versions are kept.
+ * Unset means archiving is off and deletions keep only a manifest record.
+ */
+export const ARCHIVE_ROOT_VAR = 'B2_ARCHIVE_ROOT'
+
+/**
  * Raised when a root is unset, or is set but unusable.
  *
  * Filesystem access denies by default: a server that reads or writes any path a

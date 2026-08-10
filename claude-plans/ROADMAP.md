@@ -9,9 +9,6 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-- 006 - b2_delete_file: delete a file version, and separately hide a file.
-  Wraps Bucket.deleteFileVersion and Bucket.hideFile. The hide-vs-delete
-  distinction is the whole design question: hide is reversible, delete is not.
 - 007 - b2_bucket_usage: report bytes used per bucket by summing contentLength
   over file versions, and flag buckets above a configured percentage of a
   budget. This is what replaces "quota" -- B2's native API has NO quota, cap,
@@ -59,6 +56,12 @@ several plans becomes that many lines.
 - b2_upload_file: first write tool. Local reads are confined to B2_UPLOAD_ROOT,
   denied by default, with realpath resolution before the containment check.
   (004)
+- b2_hide_file, b2_unhide_file, b2_delete_file_version. (006) Shipped WIDER
+  than the roadmap line, with approval: unhide was added because hide is only
+  reversible if something reverses it, and deletion gained a mandatory
+  append-only audit log plus optional archiving. Deletion requires the exact
+  fileId and is refused unless B2_AUDIT_LOG is set. Verified by a four-way
+  SHA-1 match across original, download, archive, and B2's own checksum.
 - b2_download_file. (005) The fence generalised to cover local WRITES
   (B2_DOWNLOAD_ROOT, separate from the read root). Written atomically via a
   temp file and rename, because the SDK documents that a checksum failure

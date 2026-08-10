@@ -28,27 +28,45 @@ engines >= 22.3.0. Pinned by .nvmrc and package.json engines.
 - `npm test` — vitest run. All tests must pass; the count grows every slice, so
   check for zero failures rather than a fixed number. The expected count for a
   given slice lives in that plan's Verification section.
-- `npm run build` — tsc. Silent on success.
+- `npm run build` — `rm -rf dist && tsc`. Purges first, per What NOT to do.
 - `npm start` — node dist/server.js. Stdio MCP server.
 - `npm run dev` — tsx src/server.ts. Same, straight from source.
-- Smoke check, no arguments — `npx @modelcontextprotocol/inspector --cli npm run
-  dev --method tools/call --tool-name b2_list_buckets`. Needs credentials in
-  .env or the environment.
-- Smoke check, with arguments — same command plus `--tool-name b2_list_files
-  --tool-arg bucketName=<name>`. Each extra argument needs its own --tool-arg.
-- b2_upload_file and b2_download_file need a Read and Write key plus their root
-  set (B2_UPLOAD_ROOT to read from, B2_DOWNLOAD_ROOT to write to). Both deny by
-  default. A Read Only key fails at the B2 API, by design.
+
+Tool names like b2_list_files are MCP tools, NOT shell commands. They exist only
+inside the running server. Define this helper once per terminal session:
+
+    b2() { local t="$1"; shift; npx @modelcontextprotocol/inspector --cli \
+      npm run dev --method tools/call --tool-name "$t" "$@"; }
+    BUCKET=<your bucket>
+
+- List every tool and its schema — `npx @modelcontextprotocol/inspector --cli
+  npm run dev --method tools/list`
+- Read — `b2 b2_list_buckets` and
+  `b2 b2_list_files --tool-arg bucketName=$BUCKET`. Each argument needs its own
+  --tool-arg.
+- Write — b2_upload_file and b2_download_file need a Read and Write key plus
+  their root set (B2_UPLOAD_ROOT to read from, B2_DOWNLOAD_ROOT to write to).
+  b2_delete_file_version additionally REQUIRES B2_AUDIT_LOG, and honours
+  B2_ARCHIVE_ROOT when set. All deny by default. A Read Only key fails at the
+  B2 API, by design.
 - GOTCHA: a relative localPath resolves against the ROOT, not your shell's cwd.
   With B2_UPLOAD_ROOT=".../uploads", pass `localPath=hello.txt`, NOT
   `localPath=uploads/hello.txt` -- the latter looks for uploads/uploads/hello.txt
   and fails with "No such file". The message shows the candidate as given and
   deliberately not the resolved path, because that would print the root.
-- Round-trip verification, the strongest check available — upload a file, then
-  download it, then compare:
-  `shasum uploads/<name> downloads/<name>` and `cmp uploads/<name> downloads/<name>`
-  Expect identical hashes, matching the sha1 in the download receipt, and no
-  `.partial` file left in the download directory.
+- GOTCHA: do not quote a fileId. It is alphanumeric with underscores, so quotes
+  only create a chance to leave a stray backslash and strand zsh at a `dquote>`
+  prompt. Assign it bare: `FID=4_zddf8f...`
+- Round-trip verification — upload, download, then
+  `shasum uploads/<name> downloads/<name>` and `cmp uploads/<name> downloads/<name>`.
+  Expect identical hashes matching the sha1 in the download receipt, and no
+  `.partial` file left behind.
+- Deletion verification — after b2_delete_file_version with an archive root set:
+  `tail -2 b2-audit.jsonl` shows an INTENT line then an OUTCOME line, both valid
+  JSON carrying the sha1 captured before the delete; and
+  `shasum uploads/<name> archive/<name>.$FID` matches. A four-way SHA-1 match
+  across original, download, archive and B2's own checksum is the strongest
+  check this project has.
 
 ## Verification
 
@@ -106,6 +124,15 @@ Never restate these rules inside a plan file — cite this section instead.
   PARENT instead and check containment on parent + basename -- skipping that
   lets "<root>/../evil.txt" through, and a symlinked parent is the same escape
   the read side already guards. From 004 and 005; see src/path-fence.ts.
+- A tool that destroys data takes the EXACT identifier of the thing destroyed
+  and never resolves it from a friendlier name. b2_delete_file_version requires
+  a fileId and refuses to look one up from a file name, so "delete hello.txt"
+  cannot be satisfied in one step: the id has to come from a listing a human
+  can see. A confirm flag is not a substitute -- the same model that calls the
+  tool would set it. Such a tool also refuses to act unless an append-only
+  record can be written, and writes INTENT before acting and OUTCOME after,
+  success or failure: a log that can miss events is not a log. From 006; see
+  src/b2/delete.ts and src/audit-log.ts.
 
 ## What NOT to do
 
@@ -127,6 +154,12 @@ Never restate these rules inside a plan file — cite this section instead.
   no write-side logic, sitting in dist waiting to be imported by accident.
   Nothing failed and nothing warned. `npm run build` now purges dist first;
   never trust a build after a rename or delete without confirming it did.
+- Never compare a path against a temp directory without realpath on macOS.
+  /var is a symlink to /private/var, so mkdtemp returns "/var/..." while any
+  fenced code returns "/private/var/...". This cost a failing test in 005, was
+  fixed there with a realpathSync wrapper and a comment -- and then happened
+  AGAIN in 006's new test file, because a comment in one file does not travel.
+  Wrap every mkdtempSync in realpathSync when the path will be compared.
 
 ## Protected files
 
@@ -167,6 +200,13 @@ These are not "earned". They apply before the first line of code exists.
   non-existence would otherwise hide, and the assertion that no rejection message
   names the root. Nothing else in the repo would fail if the fence were quietly
   weakened.
+- tests/delete.test.ts — the only coverage for the guarantees around the one
+  tool that destroys data (plan 006). Three cases are decoys whose removal
+  leaves a green suite and a weaker product: bypassGovernance is never sent
+  (removing it lets an Object Lock override be added silently), a delete with
+  no audit log configured never calls deleteVersion (removing it lets the gate
+  become advisory), and a FAILED delete still writes an intent record plus a
+  failure outcome (removing it lets the log quietly become success-only).
 
 ### Adding to this list is PRE-APPROVED
 
@@ -270,8 +310,8 @@ what THIS slice does differently from the convention, if anything.
   fits because the server passes one in. From 001.
 - Summary types at the MCP boundary — an SDK handle or response is flattened
   into a plain interface of primitives before it crosses to a client
-  (BucketSummary 001, FileSummary 003, UploadReceipt 004, DownloadReceipt 005).
-  SDK objects carry
+  (BucketSummary 001, FileSummary 003, UploadReceipt 004, DownloadReceipt 005,
+  Hide/Unhide/DeleteReceipt 006). SDK objects carry
   methods and a live client reference that cannot serialize, and an explicit
   field list keeps unplanned fields out of tool output. Name it <Thing>Summary
   or <Thing>Receipt.
@@ -284,4 +324,12 @@ what THIS slice does differently from the convention, if anything.
   idempotent honestly, and a handler that chains loadConfig -> getClient -> a
   core function and returns JSON.stringify(result, null, 2) as text. Errors are
   caught per Error results, never throws. Used by b2_list_buckets 001,
-  b2_list_files 003, b2_upload_file 004, b2_download_file 005.
+  b2_list_files 003, b2_upload_file 004, b2_download_file 005, and the three
+  mutation tools in 006 -- seven tools, all following this shape.
+- Atomic write via temp file and rename — a stream is written to
+  "<target>.<pid>.partial", counted, verified against the expected length, and
+  renamed onto the target only when it matches; any failure removes the temp
+  file and leaves the target untouched. Same directory, so the rename is a move
+  rather than a copy. Used by b2_download_file 005 and by deletion archiving
+  006, both through src/atomic-write.ts. Never write a stream straight to its
+  final path.
