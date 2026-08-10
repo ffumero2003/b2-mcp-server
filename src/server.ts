@@ -9,6 +9,7 @@ import { DEFAULT_LIMIT, MAX_LIMIT, listFiles } from './b2/files.js'
 import { uploadFile } from './b2/upload.js'
 import { downloadFile } from './b2/download.js'
 import { deleteFileVersion, hideFile, unhideFile } from './b2/delete.js'
+import { MAX_PAGES_PER_BUCKET, PAGE_SIZE, bucketUsage } from './b2/usage.js'
 import { loadConfig } from './config.js'
 import { loadDotEnv } from './env-file.js'
 
@@ -314,6 +315,54 @@ export function createServer(): McpServer {
         const receipt = await deleteFileVersion(client, { bucketName, fileName, fileId })
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_bucket_usage',
+    {
+      title: 'Report bucket storage used against a budget',
+      description:
+        'Reports bytes stored per bucket and how that compares to a budget, flagging buckets over the threshold. B2 exposes no usage endpoint, so this is computed by summing every file version, INCLUDING old versions, which B2 also bills for. The figure EXCLUDES parts of unfinished large uploads, which B2 does bill for; those uploads are counted separately as unfinishedLargeFiles, so treat bytesUsed as a floor rather than a total. Omitting bucketName scans every bucket, which costs one transaction per ' +
+        `${PAGE_SIZE} versions per bucket and is the most expensive call this server makes. A scan is capped at ${MAX_PAGES_PER_BUCKET} pages per bucket and sets truncated when the cap stops it.`,
+      inputSchema: {
+        bucketName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Bucket to measure. Omit to scan every bucket.'),
+        budgetBytes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Budget to measure against. Defaults to 10 GiB, B2 free tier.'),
+        thresholdPercent: z
+          .number()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Percent of budget at which a bucket is flagged. Defaults to 80.'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ bucketName, budgetBytes, thresholdPercent }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const report = await bucketUsage(client, {
+          bucketName,
+          budgetBytes,
+          thresholdPercent,
+        })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
         }
       } catch (error) {
         return {

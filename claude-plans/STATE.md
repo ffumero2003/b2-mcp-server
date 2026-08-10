@@ -165,3 +165,30 @@ answers "what exists and what does it do."
   calling deleteVersion, a failed delete still leaving intent plus a failure
   outcome, bypassGovernance never sent, and archiving using the fileId rather
   than the current version. Proposed for Protected files, not appended.
+
+## Plan 007 — report bucket size against a configured budget
+
+- src/b2/usage.ts — bucketUsage(client, {bucketName?, budgetBytes?,
+  thresholdPercent?}) returns a UsageReport of per-bucket BucketUsage entries
+  sorted by name, plus totalBytesUsed and anyTruncated. B2 has no usage
+  endpoint, so bytes are summed from file versions. isStoredBytes() is the core
+  of it and names all five FileAction values explicitly: upload and copy COUNT;
+  hide, folder and start do not. OLD versions are counted because B2 bills for
+  every version retained. Unfinished large uploads are COUNTED, not summed --
+  their billed bytes live in PARTS that the start record does not carry -- so
+  bytesUsed is an honest floor and unfinishedLargeFiles says what it excludes.
+  Scanning is capped at PAGE_SIZE * MAX_PAGES_PER_BUCKET versions and sets
+  truncated rather than presenting a short total as a whole one; exactly the
+  cap is a complete scan, one past it is truncated. humanBytes() renders GiB and
+  MiB so a model answers in units a person reads instead of doing arithmetic on
+  a raw count. DEFAULT_BUDGET_BYTES is 10 GiB, B2's free storage tier.
+  Constants are policy and live in code, not the environment. Reuses
+  BucketNotFoundError so a missing bucket never reads as one using zero bytes.
+- src/server.ts — modified: registers an eighth tool, b2_bucket_usage, the only
+  read-only tool added since 003. Its description states the exclusion of
+  unfinished-upload parts and the per-1000-versions transaction cost, so a
+  client can judge whether to scan a whole account.
+- tests/usage.test.ts — 22 cases across four groups: what counts as stored
+  bytes (including the three exclusions and old-version accounting), budget and
+  threshold boundaries, bucket selection, and the scan cap (including the
+  exactly-on-the-cap case that must NOT report truncated).

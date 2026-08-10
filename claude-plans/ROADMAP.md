@@ -9,13 +9,6 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-- 007 - b2_bucket_usage: report bytes used per bucket by summing contentLength
-  over file versions, and flag buckets above a configured percentage of a
-  budget. This is what replaces "quota" -- B2's native API has NO quota, cap,
-  or usage endpoint (verified against the full RawClient surface in
-  dist/raw/index.d.ts; caps live only in the web console). The budget is
-  project policy and lives in code, per CLAUDE.md House rules. Cost caveat:
-  summing paginates every file version, a Class C transaction per page.
 - 008 - b2_list_keys: list application keys with their capabilities and
   restrictions. Wraps B2Client.listKeys, whose response contains NO secrets.
 
@@ -56,6 +49,14 @@ several plans becomes that many lines.
 - b2_upload_file: first write tool. Local reads are confined to B2_UPLOAD_ROOT,
   denied by default, with realpath resolution before the containment check.
   (004)
+- b2_bucket_usage. (007) Answers the Overview's headline question, which B2
+  itself cannot: there is no usage endpoint, so bytes are summed from file
+  versions, INCLUDING old ones since B2 bills for them. hide, folder and start
+  records are excluded; unfinished large uploads are COUNTED but their parts
+  are not summed, so bytesUsed is an honest floor rather than a total. Verified
+  against the real account by an invariant a fixture cannot check: usage
+  (24,184,275 bytes over 91 versions) exceeded the b2_list_files sum
+  (24,184,247 over 90 current files) by exactly one 28-byte old version.
 - b2_hide_file, b2_unhide_file, b2_delete_file_version. (006) Shipped WIDER
   than the roadmap line, with approval: unhide was added because hide is only
   reversible if something reverses it, and deletion gained a mandatory
