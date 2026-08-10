@@ -41,8 +41,9 @@ inside the running server. Define this helper once per terminal session:
 
 - List every tool and its schema — `npx @modelcontextprotocol/inspector --cli
   npm run dev --method tools/list`
-- Read — `b2 b2_list_buckets` and
-  `b2 b2_list_files --tool-arg bucketName=$BUCKET`. Each argument needs its own
+- Read — `b2 b2_list_buckets`,
+  `b2 b2_list_files --tool-arg bucketName=$BUCKET`, and `b2 b2_bucket_usage`
+  with no arguments to measure every bucket. Each argument needs its own
   --tool-arg.
 - Write — b2_upload_file and b2_download_file need a Read and Write key plus
   their root set (B2_UPLOAD_ROOT to read from, B2_DOWNLOAD_ROOT to write to).
@@ -67,6 +68,14 @@ inside the running server. Define this helper once per terminal session:
   `shasum uploads/<name> archive/<name>.$FID` matches. A four-way SHA-1 match
   across original, download, archive and B2's own checksum is the strongest
   check this project has.
+- Usage verification — b2_bucket_usage must never report FEWER bytes than
+  b2_list_files sums, because list_files shows only current versions while
+  usage counts old ones too. Compare them:
+  `b2 b2_list_files --tool-arg bucketName=$BUCKET --tool-arg limit=1000`, add up
+  the contentLength values, then `b2 b2_bucket_usage --tool-arg bucketName=$BUCKET`.
+  Expect usage >= that sum, with the difference accounted for by old versions.
+  A usage figure BELOW the sum means the action filter is wrong -- and no
+  fixture can catch that, because a fixture agrees with whatever the filter does.
 
 ## Verification
 
@@ -207,6 +216,13 @@ These are not "earned". They apply before the first line of code exists.
   no audit log configured never calls deleteVersion (removing it lets the gate
   become advisory), and a FAILED delete still writes an intent record plus a
   failure outcome (removing it lets the log quietly become success-only).
+- tests/usage.test.ts — the only coverage for what counts as stored bytes
+  (plan 007). Three cases are decoys whose removal leaves a green suite and a
+  silently inflated number in every report: hide markers excluded, folder
+  markers excluded, and start records excluded-but-counted-separately. A fourth
+  guards the boundary that exactly MAX_PAGES_PER_BUCKET versions is a COMPLETE
+  scan, not a truncated one. Nothing else in the repo would fail if the action
+  filter started counting markers as data.
 
 ### Adding to this list is PRE-APPROVED
 
@@ -311,13 +327,13 @@ what THIS slice does differently from the convention, if anything.
 - Summary types at the MCP boundary — an SDK handle or response is flattened
   into a plain interface of primitives before it crosses to a client
   (BucketSummary 001, FileSummary 003, UploadReceipt 004, DownloadReceipt 005,
-  Hide/Unhide/DeleteReceipt 006). SDK objects carry
+  Hide/Unhide/DeleteReceipt 006, BucketUsage 007). SDK objects carry
   methods and a live client reference that cannot serialize, and an explicit
   field list keeps unplanned fields out of tool output. Name it <Thing>Summary
   or <Thing>Receipt.
 - Deterministic order is ours, not the API's — a listing sorts explicitly before
-  returning (bucketName 001, fileName 003), even when the API appears to return
-  sorted results. One localeCompare costs nothing and removes a dependency on
+  returning (bucketName 001, fileName 003, bucketName again 007), even when the
+  API appears to return sorted results. One localeCompare costs nothing and removes a dependency on
   unverified behavior, per What NOT to do.
 - Tool registration shape — every tool is registered with a zod inputSchema
   whose fields carry .describe(), MCP annotations stating readOnly/destructive/
@@ -325,7 +341,8 @@ what THIS slice does differently from the convention, if anything.
   core function and returns JSON.stringify(result, null, 2) as text. Errors are
   caught per Error results, never throws. Used by b2_list_buckets 001,
   b2_list_files 003, b2_upload_file 004, b2_download_file 005, and the three
-  mutation tools in 006 -- seven tools, all following this shape.
+  mutation tools in 006, b2_bucket_usage 007 -- eight tools, all following this
+  shape.
 - Atomic write via temp file and rename — a stream is written to
   "<target>.<pid>.partial", counted, verified against the expected length, and
   renamed onto the target only when it matches; any failure removes the temp
@@ -333,3 +350,15 @@ what THIS slice does differently from the convention, if anything.
   rather than a copy. Used by b2_download_file 005 and by deletion archiving
   006, both through src/atomic-write.ts. Never write a stream straight to its
   final path.
+- Partial results announce themselves — anything that can return less than the
+  whole truth says so in the result, never by omission. b2_list_files carries
+  truncated and nextFileName when a page is capped (003); b2_bucket_usage
+  carries truncated per bucket, anyTruncated overall, and unfinishedLargeFiles
+  for billed bytes it cannot sum (007). A partial answer presented as a complete
+  one is worse than refusing, because the caller cannot tell.
+- Policy constants in code, overridable per call — limits, budgets and
+  thresholds are named module constants, not environment variables, because a
+  limit is not a secret and is not machine-specific (House rules). Callers may
+  override per call and out-of-range values are CLAMPED rather than rejected.
+  DEFAULT_LIMIT/MAX_LIMIT in 003, DEFAULT_BUDGET_BYTES/OVER_BUDGET_THRESHOLD/
+  MAX_PAGES_PER_BUCKET in 007.
