@@ -25,13 +25,19 @@ engines >= 22.3.0. Pinned by .nvmrc and package.json engines.
 
 ## Commands
 
-- `npm test` — vitest run. Expect "Test Files 4 passed (4)", "Tests 19 passed (19)".
+- `npm test` — vitest run. All tests must pass; the count grows every slice, so
+  check for zero failures rather than a fixed number. The expected count for a
+  given slice lives in that plan's Verification section.
 - `npm run build` — tsc. Silent on success.
 - `npm start` — node dist/server.js. Stdio MCP server.
 - `npm run dev` — tsx src/server.ts. Same, straight from source.
-- Smoke check — `npx @modelcontextprotocol/inspector --cli npm run dev --method
-  tools/call --tool-name b2_list_buckets`. Needs credentials in .env or the
-  environment; returns the account's buckets as JSON.
+- Smoke check, no arguments — `npx @modelcontextprotocol/inspector --cli npm run
+  dev --method tools/call --tool-name b2_list_buckets`. Needs credentials in
+  .env or the environment.
+- Smoke check, with arguments — same command plus `--tool-name b2_list_files
+  --tool-arg bucketName=<name>`. Each extra argument needs its own --tool-arg.
+- b2_upload_file additionally needs B2_UPLOAD_ROOT set and a Read and Write key.
+  A Read Only key fails at the B2 API, by design.
 
 ## Verification
 
@@ -77,7 +83,14 @@ Never restate these rules inside a plan file — cite this section instead.
   
 ## Rules
 
-<empty until the project earns one>
+- A tool that reads or writes the local filesystem confines paths to a root
+  configured in the environment, and DENIES BY DEFAULT when that root is unset.
+  Resolve the root and the candidate with realpath BEFORE comparing them, so a
+  symlink inside the root cannot point outside it. Compare as
+  `target === root || target.startsWith(root + sep)` -- a bare startsWith
+  accepts "/data/uploads-evil" for the root "/data/uploads". Rejection messages
+  name the offending path, never the root: a caller has no need to learn where
+  the fence sits. From 004; see src/upload-path.ts.
 
 ## What NOT to do
 
@@ -125,6 +138,13 @@ These are not "earned". They apply before the first line of code exists.
   permissions" to "you have no .env". The chmod 000 case is what proves
   loadDotEnv checks readability with accessSync instead. Delete that case and an
   unreadable .env silently reports absent again.
+- tests/upload-path.test.ts — the only coverage for the upload containment fence
+  (plan 004). Three cases are decoys whose removal leaves a green suite and an
+  escapable fence: the symlink inside the root pointing out of it, the sibling
+  directory "<root>-evil" that a bare startsWith would admit, and the assertion
+  that no rejection message contains the root. Nothing else in the repo would
+  fail if the fence were quietly weakened. Plan 005 renames this to
+  tests/path-fence.test.ts; the protection follows the file, not the name.
 
 ### Adding to this list is PRE-APPROVED
 
@@ -226,3 +246,19 @@ what THIS slice does differently from the convention, if anything.
   it actually uses (BucketLister, not B2Client), so a test fake satisfies it
   with no network and no credentials, while tsc still proves the real client
   fits because the server passes one in. From 001.
+- Summary types at the MCP boundary — an SDK handle or response is flattened
+  into a plain interface of primitives before it crosses to a client
+  (BucketSummary 001, FileSummary 003, UploadReceipt 004). SDK objects carry
+  methods and a live client reference that cannot serialize, and an explicit
+  field list keeps unplanned fields out of tool output. Name it <Thing>Summary
+  or <Thing>Receipt.
+- Deterministic order is ours, not the API's — a listing sorts explicitly before
+  returning (bucketName 001, fileName 003), even when the API appears to return
+  sorted results. One localeCompare costs nothing and removes a dependency on
+  unverified behavior, per What NOT to do.
+- Tool registration shape — every tool is registered with a zod inputSchema
+  whose fields carry .describe(), MCP annotations stating readOnly/destructive/
+  idempotent honestly, and a handler that chains loadConfig -> getClient -> a
+  core function and returns JSON.stringify(result, null, 2) as text. Errors are
+  caught per Error results, never throws. Used by b2_list_buckets 001,
+  b2_list_files 003, b2_upload_file 004.

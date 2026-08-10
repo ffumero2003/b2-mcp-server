@@ -240,5 +240,24 @@ file's id, name, and size. Before this slice the server could only read.
    `hello.txt` appears with the same contentLength, then confirm it in the
    Backblaze console. Two tools agreeing is better evidence than either alone.
 
-Steps 1-4 I can run. Steps 5 and 6 need a read-write key and your bucket; I will
-report exactly which I observed rather than implying all passed.
+### VERIFIED — all steps observed
+
+Steps 1-4 confirmed during implementation. Steps 5 and 6 confirmed by the user
+against the real account once a Read and Write key existed:
+
+- Refusal: localPath=/etc/hosts returned
+  "Path is outside the permitted upload directory: /etc/hosts", with the root
+  absent from the message. The fence holds in the real server, not just in tests.
+- Upload: hello.txt (25 bytes local) returned contentLength 25, contentType
+  "text/plain", uploadedAt 2026-08-10T21:58:35.600Z.
+- contentType was NOT sent by this project. B2's b2/x-auto detection produced
+  "text/plain" on its own, confirming the decision to omit it rather than guess.
+- Cross-check: b2_list_files returned the IDENTICAL fileId and contentLength for
+  the same object. Two independently written tools agreeing is the real-data
+  invariant, satisfied without a fixture.
+
+GOTCHA worth keeping: relative localPath resolves against B2_UPLOAD_ROOT, not
+the shell's cwd. With root ".../uploads", the correct argument is "hello.txt";
+"uploads/hello.txt" resolves to ".../uploads/uploads/hello.txt" and fails with
+"No such file". The message names the candidate as given and deliberately does
+not show the resolved path, because that would print the root.

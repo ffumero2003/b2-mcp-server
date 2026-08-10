@@ -168,3 +168,13 @@ name buckets but never look inside one.
 5. Real-data invariant: compare the file names and count against the Backblaze
    console for that bucket. A fixture-only pass proves the mapper is
    self-consistent, not that it reflects the real bucket.
+
+### VERIFIED
+
+Confirmed against the real account after plan 004 supplied a file to find:
+
+- An empty prefix match returned files: [], truncated false, nextFileName null
+  -- the empty path behaves as specified rather than erroring.
+- After the 004 upload, prefix=hello returned exactly one entry: hello.txt,
+  contentLength 25, contentType text/plain, with the SAME fileId the upload
+  receipt reported. The mapper reflects the real bucket, not just the fixture.
