@@ -8,7 +8,12 @@ Make sure you start every response saying my name.
 
 ## Overview
 
-An MCP server that wraps @backblaze-labs/b2-sdk and exposes B2 Cloud Storage operations — list buckets, upload/download files, manage files, check quota, manage application keys — as tools any MCP-compatible AI client can call. Lets someone manage B2 storage by just talking to an AI ("show me buckets over 80% quota") instead of writing SDK code or using the web console.
+An MCP server that wraps @backblaze-labs/b2-sdk and exposes B2 Cloud Storage operations — list buckets, list/upload/download/delete files, report bucket size against a configured budget, inspect application keys — as tools any MCP-compatible AI client can call. Lets someone manage B2 storage by just talking to an AI ("which buckets are over 80% of their budget?") instead of writing SDK code or using the web console.
+
+Note: B2's native API exposes no quota or usage endpoint — verified against the
+full RawClient surface, where caps and alerts exist only in the web console.
+Bucket size is computed by summing file sizes; the budget it is measured
+against is project policy, defined in code.
 
 ## Stack
 
@@ -197,7 +202,10 @@ it, list it.
 - The full Planned/Possible roadmap lives in claude-plans/ROADMAP.md, not
   repeated in each plan's Out of scope section. A plan's Out of scope section
   lists only what THIS slice newly parks, plus a pointer: "full roadmap:
-  see ROADMAP.md."
+  see ROADMAP.md." Once a plan number is assigned to an item — even before
+  that plan's file exists — write it in place as "00N - <description>",
+  splitting a bundled item into one line per number. Unwritten, the
+  assignment is scratch and won't survive /clear.
 
 ## Established conventions
 
