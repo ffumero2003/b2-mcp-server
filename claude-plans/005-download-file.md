@@ -168,6 +168,14 @@ directory from `mkdtemp` as the root.
 - tests/upload-path.test.ts — DELETED, replaced by the rename above.
 - tests/upload.test.ts — modified; import path only.
 - .env.example — modified; document B2_DOWNLOAD_ROOT.
+- .gitignore — modified; add the uploads/ and downloads/ scratch directories.
+- package.json — modified; the build script purges dist before compiling.
+  ADDED AFTER THE FACT, with approval: this file was not in the original Files
+  list. tsc leaves output for deleted sources, so dist/upload-path.js survived
+  the deletion of src/upload-path.ts -- a stale copy of the OLD fence with no
+  write-side logic. Recorded here as the plan gap it was rather than left as an
+  undocumented implementation choice. Now also CLAUDE.md > What NOT to do.
+  Caveat: `rm -rf` is not Windows-portable.
 
 ## Out of scope (parked)
 
@@ -234,4 +242,37 @@ this slice the server could put files into B2 but never get them back out.
    compare, and confirm no `.partial` file is left in the root. Byte-identical
    round trip is the only proof that matters here.
 
-Steps 1-4 I can run. Steps 5 and 6 need the read-write key and your bucket.
+### VERIFIED — all six steps observed
+
+1. `npm test` — 8 files, 68 tests, zero failures.
+   DISCREPANCY, recorded not hidden: this plan predicted the fence file would
+   keep its 12 cases and add 4 (16 total) and that download would have 8.
+   Actual: 20 fence cases (12 read-side unchanged, 8 write-side) and 10
+   download cases. The extra write-side cases (existing file accepted so the
+   overwrite decision stays with the caller, writing onto a directory,
+   unconfigured root, and the root never appearing in a message) and the two
+   extra download cases (no .partial left on success, an existing file
+   surviving a mid-stream failure) were gaps in the plan's case list, not a
+   miscount.
+2. `npm run build` — exit 0.
+   ISSUE FOUND: tsc does not delete output for removed sources, so
+   dist/upload-path.js survived after src/upload-path.ts was deleted. Harmless
+   at runtime because nothing imports it, but a stale copy of the OLD fence
+   without write-side logic is exactly the sort of thing that gets imported by
+   accident later. Purged by hand; a clean step for the build script is
+   proposed rather than applied, since package.json was not in this plan's
+   Files list.
+3. Destination outside the root returned
+   "Path is outside the permitted directory: /etc/evil.txt", root absent.
+4. B2_DOWNLOAD_ROOT unset returned
+   "Disabled: set B2_DOWNLOAD_ROOT to the directory this operation may use".
+5. Round trip against the real account: downloaded hello.txt, contentLength 25,
+   contentType text/plain, sha1 e8ffe076...3a6070, and the fileId IDENTICAL to
+   the one plan 004's upload receipt reported.
+6. Real-data invariant, three-way agreement:
+   - shasum uploads/hello.txt   = e8ffe0764639709ed7f1856917c33fa2073a6070
+   - shasum downloads/hello.txt = e8ffe0764639709ed7f1856917c33fa2073a6070
+   - sha1 B2 reported           = e8ffe0764639709ed7f1856917c33fa2073a6070
+   `cmp` reports the files identical, and no .partial file remained in the
+   download directory. The bytes that left the disk are the bytes that came
+   back.

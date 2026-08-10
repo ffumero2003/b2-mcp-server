@@ -75,14 +75,7 @@ answers "what exists and what does it do."
 
 ## Plan 004 — upload a local file to a bucket
 
-- src/upload-path.ts — resolveUploadPath(candidate, env) is the security
-  boundary for local file access. Uploads DENY BY DEFAULT: without
-  B2_UPLOAD_ROOT set, every upload is refused. Root and candidate both go
-  through realpath BEFORE comparison, so a symlink inside the root cannot point
-  outside it. Containment is `=== root || startsWith(root + sep)`, never bare
-  startsWith, so a sibling named "<root>-evil" is refused. Rejection messages
-  name the candidate but NEVER the root. UploadRootNotConfiguredError and
-  PathNotAllowedError.
+- src/upload-path.ts — SUPERSEDED by src/path-fence.ts in plan 005.
 - src/b2/upload.ts — uploadFile(client, options, resolvePath, createSource)
   returns {fileId, fileName, bucketName, contentLength, contentType,
   uploadedAt}. Path policy runs before any network call, and the RESOLVED path
@@ -96,9 +89,42 @@ answers "what exists and what does it do."
   rather than overwrites), idempotentHint false (two calls, two versions).
 - .env.example — modified: documents B2_UPLOAD_ROOT, and that uploading needs a
   Read and Write key while listing does not.
-- tests/upload-path.test.ts — 12 cases including the traversal escape, the
-  sibling-prefix directory, and the symlink-out-of-root escape. Proposed for
-  Protected files, see the plan's Follow-ups.
+- tests/upload-path.test.ts — SUPERSEDED by tests/path-fence.test.ts in 005.
 - tests/upload.test.ts — 8 cases: receipt fields, basename defaulting, explicit
   fileName, contentType omitted and forwarded, forbidden path refused without
   calling upload, unknown bucket, SDK rejection propagates.
+## Plan 005 — download a file to a local path
+
+- src/path-fence.ts — replaces src/upload-path.ts and now guards BOTH
+  directions. resolveExistingFile(candidate, rootVar, env) is the read side
+  (uploads); resolveNewFilePath(candidate, rootVar, env) is the write side
+  (downloads), which realpaths the PARENT because the target may not exist yet.
+  Both deny by default. UPLOAD_ROOT_VAR and DOWNLOAD_ROOT_VAR are separate, so
+  read and write access are granted independently. RootNotConfiguredError
+  (renamed from UploadRootNotConfiguredError, now that it serves both roots) and
+  PathNotAllowedError.
+- src/b2/download.ts — downloadFile(client, options, resolvePath) returns
+  {fileName, localPath, bucketName, contentLength, contentType, fileId, sha1,
+  downloadedAt}. Streams to "<target>.<pid>.partial" and renames onto the target
+  only after a complete transfer, because the SDK documents that a checksum
+  failure errors the stream AFTER bytes have flowed. Any failure removes the
+  temp file and leaves the target untouched. Bytes written are counted and
+  checked against contentLength. localPath defaults to the BASENAME of the B2
+  file name, which is attacker-controlled data and must not steer the target.
+  File content is never returned. DestinationExistsError, IncompleteDownloadError.
+- src/b2/upload.ts — modified: imports the fence from its new home.
+- src/server.ts — modified: registers a fourth tool, b2_download_file, with
+  destructiveHint TRUE (a replaced local file has no version history) and
+  idempotentHint true.
+- .env.example — modified: documents B2_DOWNLOAD_ROOT and the relative-path
+  gotcha for B2_UPLOAD_ROOT.
+- .gitignore — modified: adds uploads/ and downloads/ scratch directories.
+- tests/path-fence.test.ts — 20 cases. The 12 read-side cases moved unchanged
+  from tests/upload-path.test.ts; 8 write-side cases added, including the
+  symlinked-parent escape and the traversal that the target's non-existence
+  would otherwise hide. PROTECTED, see CLAUDE.md (the entry still names the old
+  file; renaming it is proposed, not applied).
+- tests/download.test.ts — 10 cases: receipt fields, basename defaulting,
+  refusing and honouring overwrite, a mid-stream failure leaving no file and no
+  .partial, a mid-stream failure not clobbering an existing file, a short body,
+  unknown bucket, SDK rejection propagates.

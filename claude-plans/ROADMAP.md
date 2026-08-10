@@ -9,8 +9,6 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-- 005 - b2_download_file: download a file by name to a local path. Wraps
-  Bucket.download.
 - 006 - b2_delete_file: delete a file version, and separately hide a file.
   Wraps Bucket.deleteFileVersion and Bucket.hideFile. The hide-vs-delete
   distinction is the whole design question: hide is reversible, delete is not.
@@ -61,3 +59,8 @@ several plans becomes that many lines.
 - b2_upload_file: first write tool. Local reads are confined to B2_UPLOAD_ROOT,
   denied by default, with realpath resolution before the containment check.
   (004)
+- b2_download_file. (005) The fence generalised to cover local WRITES
+  (B2_DOWNLOAD_ROOT, separate from the read root). Written atomically via a
+  temp file and rename, because the SDK documents that a checksum failure
+  errors the stream after bytes have flowed. Verified by a byte-identical
+  round trip: upload and download SHA-1s match B2's own.

@@ -7,6 +7,7 @@ import { listBuckets } from './b2/buckets.js'
 import { getClient } from './b2/client.js'
 import { DEFAULT_LIMIT, MAX_LIMIT, listFiles } from './b2/files.js'
 import { uploadFile } from './b2/upload.js'
+import { downloadFile } from './b2/download.js'
 import { loadConfig } from './config.js'
 import { loadDotEnv } from './env-file.js'
 
@@ -157,6 +158,55 @@ export function createServer(): McpServer {
           localPath,
           fileName,
           contentType,
+        })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_download_file',
+    {
+      title: 'Download a B2 file to local disk',
+      description:
+        'Downloads a file from a bucket to the local filesystem and returns where it landed, its size, type, and SHA-1. The destination must sit inside the directory named by B2_DOWNLOAD_ROOT. An existing file is not replaced unless overwrite is true. File content is never returned, only the path it was written to.',
+      inputSchema: {
+        bucketName: z.string().min(1).describe('Name of the bucket to read from.'),
+        fileName: z.string().min(1).describe('Name of the file in the bucket.'),
+        localPath: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Destination inside B2_DOWNLOAD_ROOT. Defaults to the file base name.'),
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe('Replace an existing destination file. Defaults to false.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        // Unlike upload, this CAN destroy data: a replaced local file has no
+        // version history to recover from.
+        destructiveHint: true,
+        // The same version downloaded twice yields the same bytes.
+        idempotentHint: true,
+      },
+    },
+    async ({ bucketName, fileName, localPath, overwrite }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const receipt = await downloadFile(client, {
+          bucketName,
+          fileName,
+          localPath,
+          overwrite,
         })
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],

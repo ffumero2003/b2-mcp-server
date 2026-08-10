@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { FileSource } from '@backblaze-labs/b2-sdk'
-import { resolveUploadPath } from '../upload-path.js'
+import { UPLOAD_ROOT_VAR, resolveExistingFile } from '../path-fence.js'
 import { BucketNotFoundError } from './files.js'
 
 /** What an upload produces, flattened for the MCP boundary. */
@@ -58,7 +58,8 @@ export async function uploadFile(
     fileName?: string
     contentType?: string
   },
-  resolvePath: (candidate: string) => Promise<string> = resolveUploadPath,
+  resolvePath: (candidate: string) => Promise<string> = (candidate) =>
+    resolveExistingFile(candidate, UPLOAD_ROOT_VAR),
   createSource: (path: string) => Promise<unknown> = (path) => FileSource.fromPath(path),
 ): Promise<UploadReceipt> {
   // Path policy first: refuse a forbidden path before spending a network call

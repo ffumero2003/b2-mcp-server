@@ -36,8 +36,19 @@ engines >= 22.3.0. Pinned by .nvmrc and package.json engines.
   .env or the environment.
 - Smoke check, with arguments — same command plus `--tool-name b2_list_files
   --tool-arg bucketName=<name>`. Each extra argument needs its own --tool-arg.
-- b2_upload_file additionally needs B2_UPLOAD_ROOT set and a Read and Write key.
-  A Read Only key fails at the B2 API, by design.
+- b2_upload_file and b2_download_file need a Read and Write key plus their root
+  set (B2_UPLOAD_ROOT to read from, B2_DOWNLOAD_ROOT to write to). Both deny by
+  default. A Read Only key fails at the B2 API, by design.
+- GOTCHA: a relative localPath resolves against the ROOT, not your shell's cwd.
+  With B2_UPLOAD_ROOT=".../uploads", pass `localPath=hello.txt`, NOT
+  `localPath=uploads/hello.txt` -- the latter looks for uploads/uploads/hello.txt
+  and fails with "No such file". The message shows the candidate as given and
+  deliberately not the resolved path, because that would print the root.
+- Round-trip verification, the strongest check available — upload a file, then
+  download it, then compare:
+  `shasum uploads/<name> downloads/<name>` and `cmp uploads/<name> downloads/<name>`
+  Expect identical hashes, matching the sha1 in the download receipt, and no
+  `.partial` file left in the download directory.
 
 ## Verification
 
@@ -90,7 +101,11 @@ Never restate these rules inside a plan file — cite this section instead.
   `target === root || target.startsWith(root + sep)` -- a bare startsWith
   accepts "/data/uploads-evil" for the root "/data/uploads". Rejection messages
   name the offending path, never the root: a caller has no need to learn where
-  the fence sits. From 004; see src/upload-path.ts.
+  the fence sits. Read and write get SEPARATE roots, so the two can be granted
+  independently. On the write side the target may not exist yet, so realpath its
+  PARENT instead and check containment on parent + basename -- skipping that
+  lets "<root>/../evil.txt" through, and a symlinked parent is the same escape
+  the read side already guards. From 004 and 005; see src/path-fence.ts.
 
 ## What NOT to do
 
@@ -106,6 +121,12 @@ Never restate these rules inside a plan file — cite this section instead.
   ENOENT rather than EACCES. Both were caught by a verification step run
   against real behavior, never by tests written from assumptions. Write the
   fixture from observed behavior, not from what the API ought to do.
+- Never assume the build directory reflects current source. tsc does not delete
+  output for sources you removed: after src/upload-path.ts was deleted in 005,
+  dist/upload-path.js survived a rebuild -- a stale copy of the OLD fence with
+  no write-side logic, sitting in dist waiting to be imported by accident.
+  Nothing failed and nothing warned. `npm run build` now purges dist first;
+  never trust a build after a rename or delete without confirming it did.
 
 ## Protected files
 
@@ -138,13 +159,14 @@ These are not "earned". They apply before the first line of code exists.
   permissions" to "you have no .env". The chmod 000 case is what proves
   loadDotEnv checks readability with accessSync instead. Delete that case and an
   unreadable .env silently reports absent again.
-- tests/upload-path.test.ts — the only coverage for the upload containment fence
-  (plan 004). Three cases are decoys whose removal leaves a green suite and an
-  escapable fence: the symlink inside the root pointing out of it, the sibling
-  directory "<root>-evil" that a bare startsWith would admit, and the assertion
-  that no rejection message contains the root. Nothing else in the repo would
-  fail if the fence were quietly weakened. Plan 005 renames this to
-  tests/path-fence.test.ts; the protection follows the file, not the name.
+- tests/path-fence.test.ts — the only coverage for the containment fence in BOTH
+  directions (plans 004, 005). Five cases are decoys whose removal leaves a green
+  suite and an escapable fence: the symlink inside the root pointing out of it,
+  the sibling directory "<root>-evil" that a bare startsWith would admit, the
+  symlinked PARENT on the write side, the traversal that the target's
+  non-existence would otherwise hide, and the assertion that no rejection message
+  names the root. Nothing else in the repo would fail if the fence were quietly
+  weakened.
 
 ### Adding to this list is PRE-APPROVED
 
@@ -248,7 +270,8 @@ what THIS slice does differently from the convention, if anything.
   fits because the server passes one in. From 001.
 - Summary types at the MCP boundary — an SDK handle or response is flattened
   into a plain interface of primitives before it crosses to a client
-  (BucketSummary 001, FileSummary 003, UploadReceipt 004). SDK objects carry
+  (BucketSummary 001, FileSummary 003, UploadReceipt 004, DownloadReceipt 005).
+  SDK objects carry
   methods and a live client reference that cannot serialize, and an explicit
   field list keeps unplanned fields out of tool output. Name it <Thing>Summary
   or <Thing>Receipt.
@@ -261,4 +284,4 @@ what THIS slice does differently from the convention, if anything.
   idempotent honestly, and a handler that chains loadConfig -> getClient -> a
   core function and returns JSON.stringify(result, null, 2) as text. Errors are
   caught per Error results, never throws. Used by b2_list_buckets 001,
-  b2_list_files 003, b2_upload_file 004.
+  b2_list_files 003, b2_upload_file 004, b2_download_file 005.
