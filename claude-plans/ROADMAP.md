@@ -9,11 +9,6 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-- 003 - b2_list_files: list file names in a bucket, with optional prefix and
-  result limit. Wraps Bucket.listFileNames. Read-only.
-- 004 - b2_upload_file: upload a local file to a bucket. Wraps Bucket.upload.
-  Ordered before download so 005 can verify against a file this project put
-  there itself.
 - 005 - b2_download_file: download a file by name to a local path. Wraps
   Bucket.download.
 - 006 - b2_delete_file: delete a file version, and separately hide a file.
@@ -61,3 +56,8 @@ several plans becomes that many lines.
 - List buckets over MCP: stdio server exposing b2_list_buckets. (001)
 - .env file loading. (002) Landed with ZERO dependencies: Node 22's built-in
   process.loadEnvFile replaced the planned dotenv package.
+- b2_list_files: one page of current files in a bucket, optional prefix and
+  limit, with truncated/nextFileName so partial results are never silent. (003)
+- b2_upload_file: first write tool. Local reads are confined to B2_UPLOAD_ROOT,
+  denied by default, with realpath resolution before the containment check.
+  (004)

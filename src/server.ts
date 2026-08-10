@@ -2,8 +2,11 @@
 import { pathToFileURL } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
 import { listBuckets } from './b2/buckets.js'
 import { getClient } from './b2/client.js'
+import { DEFAULT_LIMIT, MAX_LIMIT, listFiles } from './b2/files.js'
+import { uploadFile } from './b2/upload.js'
 import { loadConfig } from './config.js'
 import { loadDotEnv } from './env-file.js'
 
@@ -67,6 +70,96 @@ export function createServer(): McpServer {
         const buckets = await listBuckets(client)
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(buckets, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_list_files',
+    {
+      title: 'List files in a B2 bucket',
+      description:
+        'Lists one page of current files in a bucket, as JSON objects with fileName, fileId, contentLength, contentType, and uploadedAt. Optionally filtered by name prefix. The result reports truncated and nextFileName when more files exist beyond the page.',
+      inputSchema: {
+        bucketName: z.string().min(1).describe('Name of the bucket to list.'),
+        prefix: z
+          .string()
+          .optional()
+          .describe('Only list files whose name starts with this prefix.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_LIMIT)
+          .optional()
+          .describe(`Maximum files to return. Defaults to ${DEFAULT_LIMIT}.`),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ bucketName, prefix, limit }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const listing = await listFiles(client, { bucketName, prefix, limit })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(listing, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_upload_file',
+    {
+      title: 'Upload a local file to a B2 bucket',
+      description:
+        'Uploads a file from the local filesystem into a bucket and returns the stored file id, name, size, and type. The local path must sit inside the directory named by B2_UPLOAD_ROOT; uploads are refused otherwise. Uploading an existing name adds a new version rather than replacing the old one.',
+      inputSchema: {
+        bucketName: z.string().min(1).describe('Name of the destination bucket.'),
+        localPath: z
+          .string()
+          .min(1)
+          .describe('Path to the local file. Must be inside B2_UPLOAD_ROOT.'),
+        fileName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Name to store in the bucket. Defaults to the local file name.'),
+        contentType: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('MIME type. Omit to let B2 detect it.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        // B2 keeps versions, so an existing file is added to, not destroyed.
+        destructiveHint: false,
+        // Two calls produce two versions.
+        idempotentHint: false,
+      },
+    },
+    async ({ bucketName, localPath, fileName, contentType }) => {
+      try {
+        const client = await getClient(loadConfig())
+        const receipt = await uploadFile(client, {
+          bucketName,
+          localPath,
+          fileName,
+          contentType,
+        })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(receipt, null, 2) }],
         }
       } catch (error) {
         return {
