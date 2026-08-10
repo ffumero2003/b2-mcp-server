@@ -1,0 +1,31 @@
+{
+  "name": "b2-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server exposing Backblaze B2 Cloud Storage operations as tools",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "b2-mcp-server": "dist/server.js"
+  },
+  "engines": {
+    "node": ">=22.3.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@backblaze-labs/b2-sdk": "^0.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.0.0"
+  }
+}
