@@ -134,7 +134,9 @@ Never restate these rules inside a plan file — cite this section instead.
   proposing a fix.
 - A guard whose failure path never fired is UNVERIFIED, and the plan says so
   rather than implying full coverage. Still untriggered: 005's multi-bucket
-  paths, 007's scan cap and multi-bucket totals, and 006's audit-log gate.
+  paths, 007's scan cap and multi-bucket totals, 006's audit-log gate, and
+  009's unrestricted branch of listVisibleBuckets, which cannot run against
+  the real account without re-authorizing as the master key.
   Green tests plus a happy-path smoke check is not the same as a proven guard.
   Name the untriggered paths explicitly in the plan's verification record.
 - 008's capability pre-check is now VERIFIED, and how it got there is the point.
@@ -385,10 +387,18 @@ what THIS slice does differently from the convention, if anything.
   it actually uses (BucketLister, not B2Client), so a test fake satisfies it
   with no network and no credentials, while tsc still proves the real client
   fits because the server passes one in. From 001.
+- Account-wide calls respect the key's own scope, in ONE place — a call that
+  covers "everything" (every bucket, every key) asks what the authorized
+  credential is actually allowed to see and narrows the request itself, rather
+  than asking broadly and hoping. src/b2/scope.ts is that place: three callers
+  in 009 went through it instead of each reading getAllowedBucketId(). One
+  chokepoint means a fourth caller cannot reintroduce the 401 by forgetting,
+  and the rule is written down once where it can be tested. From 009.
 - Summary types at the MCP boundary — an SDK handle or response is flattened
   into a plain interface of primitives before it crosses to a client
   (BucketSummary 001, FileSummary 003, UploadReceipt 004, DownloadReceipt 005,
-  Hide/Unhide/DeleteReceipt 006, BucketUsage 007, KeySummary 008). SDK objects
+  Hide/Unhide/DeleteReceipt 006, BucketUsage 007, KeySummary 008,
+  BucketListing 009). SDK objects
   carry
   methods and a live client reference that cannot serialize, and an explicit
   field list keeps unplanned fields out of tool output. Name it <Thing>Summary
@@ -418,7 +428,9 @@ what THIS slice does differently from the convention, if anything.
   truncated and nextFileName when a page is capped (003); b2_bucket_usage
   carries truncated per bucket, anyTruncated overall, and unfinishedLargeFiles
   for billed bytes it cannot sum (007); b2_list_keys carries truncated at
-  MAX_KEYS (008). A partial answer presented as a complete
+  MAX_KEYS (008); b2_list_buckets and b2_bucket_usage carry scopedToBucketId
+  when the key's own restriction narrowed a whole-account listing to one
+  bucket (009). A partial answer presented as a complete
   one is worse than refusing, because the caller cannot tell.
 - Policy constants in code, overridable per call — limits, budgets and
   thresholds are named module constants, not environment variables, because a
