@@ -38,12 +38,14 @@ the failure does not name the version.
 Tool names like b2_list_files are MCP tools, NOT shell commands. They exist only
 inside the running server. Define this helper once per terminal session:
 
-    b2() { local t="$1"; shift; npx @modelcontextprotocol/inspector --cli \
-      npm run dev --method tools/call --tool-name "$t" "$@"; }
+    b2() { local t="$1"; shift; npx -y @modelcontextprotocol/inspector@0.15.0 --cli npm run dev --method tools/call --tool-name "$t" "$@"; }
     BUCKET=<your bucket>
 
-- List every tool and its schema — `npx @modelcontextprotocol/inspector --cli
-  npm run dev --method tools/list`
+Paste the function as ONE line. The pinned version is not optional and not
+cosmetic: see What NOT to do on the inspector.
+
+- List every tool and its schema — `npx -y
+  @modelcontextprotocol/inspector@0.15.0 --cli npm run dev --method tools/list`
 - Read — `b2 b2_list_buckets`,
   `b2 b2_list_files --tool-arg bucketName=$BUCKET`, `b2 b2_bucket_usage` with no
   arguments to measure every bucket, and `b2 b2_list_keys`. Each argument needs
@@ -134,8 +136,8 @@ Never restate these rules inside a plan file — cite this section instead.
   proposing a fix.
 - A guard whose failure path never fired is UNVERIFIED, and the plan says so
   rather than implying full coverage. Still untriggered: 005's multi-bucket
-  paths, 007's scan cap and multi-bucket totals, 006's audit-log gate, and
-  009's unrestricted branch of listVisibleBuckets, which cannot run against
+  paths, 007's scan cap and multi-bucket totals, and 009's unrestricted branch
+  of listVisibleBuckets, which cannot run against
   the real account without re-authorizing as the master key.
   Green tests plus a happy-path smoke check is not the same as a proven guard.
   Name the untriggered paths explicitly in the plan's verification record.
@@ -146,6 +148,17 @@ Never restate these rules inside a plan file — cite this section instead.
   scoped key made it refuse for real, with the predicted message, and in the
   same session exposed plan 009's 401. An untriggered guard is not merely
   unproven; it is a place where the setup, not the code, may be what is wrong.
+- 006's audit-log gate is now VERIFIED, and the form of the proof is the point.
+  A refusal on a fileId that no longer exists proves nothing: getFileInfo would
+  have failed anyway, so the gate and the lookup are indistinguishable. The
+  convincing form is a VALID, CURRENT, MATCHING fileId with B2_AUDIT_LOG
+  withheld -- the refusal then proves the gate runs BEFORE the lookup
+  (delete.ts:196) rather than behind it. Run the identical command twice, one
+  env var apart: withheld, it refuses without reaching B2; configured, it
+  deletes and writes INTENT then OUTCOME. Withhold it per command with
+  `B2_AUDIT_LOG= <full npx command>` rather than by editing .env, which is
+  protected and easy to leave in the wrong state -- shell values win over the
+  file (env-file.ts:24-27) and an empty one is preserved.
 
   
 ## Rules
@@ -222,6 +235,18 @@ Never restate these rules inside a plan file — cite this section instead.
   fixed there with a realpathSync wrapper and a comment -- and then happened
   AGAIN in 006's new test file, because a comment in one file does not travel.
   Wrap every mkdtempSync in realpathSync when the path will be compared.
+- Never leave the MCP inspector unpinned. `npx @modelcontextprotocol/inspector`
+  resolved to 0.15.0 for this project's whole life and now resolves to 2.1.0,
+  which DOES NOT PROPAGATE THE SHELL ENVIRONMENT to the server it spawns. Every
+  documented B2_* override silently stops working: `B2_AUDIT_LOG= npx ...`
+  leaves the .env value in force, so the deletion gate does not fire and the
+  call proceeds as though nothing were withheld. Nothing errors and nothing
+  warns, because .env alone still configures the server correctly. Verified by
+  running the identical delete against both versions with the same fileId:
+  0.15.0 refused, 2.1.0 did not. This is the empty .message scar a third time --
+  first the shape of a dependency's errors, then the shape of its PERMISSIONS,
+  now the shape of how it SPAWNS A PROCESS. Pin the version in the helper, and
+  distrust any verification run through a tool that was silently upgraded.
 
 ## Protected files
 
