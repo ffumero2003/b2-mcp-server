@@ -330,3 +330,27 @@ switched on. Before this slice nothing the server did could remove anything.
 The download refusal seen mid-run ("Disabled: set B2_DOWNLOAD_ROOT") was the
 deny-by-default fence behaving correctly against an unconfigured root, not a
 defect.
+
+## Audit-log gate — verified live on 2026-08-11, during plan 010's close-out
+
+This guard shipped with 006 but had never refused against a live run; it was
+named as UNVERIFIED in CLAUDE.md > Verification until now. It has now fired:
+
+    B2_AUDIT_LOG= npx tsx src/server.ts < <three JSON-RPC lines>
+    -> "Refusing to destroy data with no record: set B2_AUDIT_LOG to a file path"
+
+Run with `bucketName=no-such-bucket`. That choice is what makes it a proof of
+ORDER rather than of the message: the same call with the audit log configured
+returns "No bucket named no-such-bucket in this account", so getting the audit
+refusal instead means the gate ran before any B2 request. b2-audit.jsonl stayed
+at 18 lines, and nothing was destroyed.
+
+TECHNIQUE, worth knowing before repeating this: `B2_AUDIT_LOG= b2 ...` through
+the MCP inspector does NOT work. The inspector spawns the server with a
+sanitized environment, so the variable never arrives and the server's own
+loadDotEnv reads the real .env -- the run looks like the gate failed to fire
+when it was never given the chance. Driving the server directly over stdio is
+what let the override land. Node's process.loadEnvFile does not overwrite a
+variable already present in the environment, including one set to the empty
+string, which is why an empty value reaches auditLogPath's falsy check.
+No edit to .env was needed, and none was made.
