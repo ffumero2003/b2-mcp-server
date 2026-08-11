@@ -442,6 +442,24 @@ what THIS slice does differently from the convention, if anything.
 - Policy constants in code, overridable per call — limits, budgets and
   thresholds are named module constants, not environment variables, because a
   limit is not a secret and is not machine-specific (House rules). Callers may
-  override per call and out-of-range values are CLAMPED rather than rejected.
-  DEFAULT_LIMIT/MAX_LIMIT in 003, DEFAULT_BUDGET_BYTES/OVER_BUDGET_THRESHOLD/
-  MAX_PAGES_PER_BUCKET in 007.
+  override them per call. DEFAULT_LIMIT/MAX_LIMIT in 003,
+  DEFAULT_BUDGET_BYTES/OVER_BUDGET_THRESHOLD/MAX_PAGES_PER_BUCKET in 007.
+  Out of range is REJECTED at the MCP boundary, by the zod schema: limit above
+  MAX_LIMIT (server.ts) and thresholdPercent outside 1-100 come back as a
+  validation error naming the bound, not as a silently substituted value. A
+  caller that asked for 5000 and received 1000 would have no way to know the
+  answer was not the one it asked for.
+  files.ts DOES also clamp (clampLimit, files.ts:76). That redundancy is
+  deliberate and predates this entry: 003 chose it so listFiles stays correct
+  for a non-MCP caller while the protocol edge still returns a message naming
+  the bound. One consequence to know: the clamp is unreachable through any MCP
+  client, so tests/files.test.ts:106 asserts it with limit 5000 -- a green test
+  guarding a path no client can take. usage.ts has no clamp at all; lines
+  189-190 are plain ?? defaults.
+  HARVEST SCAR: this entry read "out-of-range values are CLAMPED rather than
+  rejected" from 2026-08-11 until it was checked against the running server.
+  003 had described the design correctly all along; the harvest into this file
+  lost the distinction and then cited 007, which never clamped, as an example of
+  it. The code was right and the convention was wrong -- the opposite of the
+  usual failure. When harvesting a pattern up here, quote the plan's own words
+  rather than paraphrasing them.

@@ -65,8 +65,9 @@ answers "what exists and what does it do."
   page of current files as {fileName, fileId, contentLength, contentType,
   uploadedAt}, sorted by fileName, plus truncated and nextFileName. Never
   auto-paginates. uploadTimestamp (epoch ms) becomes ISO 8601. DEFAULT_LIMIT 100
-  and MAX_LIMIT 1000 are policy constants; a caller's limit is clamped, not
-  rejected. BucketNotFoundError when getBucket returns null, so a missing bucket
+  and MAX_LIMIT 1000 are policy constants. listFiles clamps a caller's limit;
+  the MCP boundary rejects one above MAX_LIMIT before the clamp is reached, so
+  the clamp serves non-MCP callers only. Deliberate, per 003's Design. BucketNotFoundError when getBucket returns null, so a missing bucket
   never reads as an empty one. BucketFinder/FileLister are the narrow structural
   types; FileVersionLike is the shape read off an SDK FileVersion.
 - src/server.ts — modified: registers a second tool, b2_list_files, with a zod
