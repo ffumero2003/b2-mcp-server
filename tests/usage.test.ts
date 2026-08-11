@@ -37,9 +37,16 @@ function fakeBucket(
   }
 }
 
-/** Stands in for B2Client with no network and no credentials. */
-function fakeClient(buckets: readonly UsageBucket[]): UsageClient {
+/**
+ * Stands in for B2Client with no network and no credentials. allowedBucketId
+ * defaults to null, the unrestricted key every case here assumed before 009.
+ */
+function fakeClient(
+  buckets: readonly UsageBucket[],
+  allowedBucketId: string | null = null,
+): UsageClient {
   return {
+    accountInfo: { getAllowedBucketId: () => allowedBucketId },
     listBuckets: async () => buckets,
     getBucket: async (name) => buckets.find((b) => b.name === name) ?? null,
   }
@@ -243,8 +250,27 @@ describe('bucketUsage - reporting', () => {
     expect(report.totalBytesUsedHuman).toBe('5.0 MiB')
   })
 
+  // Added by 009. A whole-account scan under a bucket-restricted key covers one
+  // bucket, and the report must say which -- otherwise one bucket's bytes read
+  // as the account's total.
+  it('reports the bucket a restricted key confined the scan to', async () => {
+    const client = fakeClient([fakeBucket('a', [version('upload', 5 * MIB)])], 'id-a')
+
+    const report = await bucketUsage(client)
+
+    expect(report.scopedToBucketId).toBe('id-a')
+    expect(report.buckets.map((b) => b.bucketName)).toEqual(['a'])
+  })
+
+  it('reports scopedToBucketId null for an unrestricted key', async () => {
+    const report = await bucketUsage(fakeClient([fakeBucket('a', [version('upload', 1)])]))
+
+    expect(report.scopedToBucketId).toBeNull()
+  })
+
   it('propagates an SDK rejection instead of swallowing it', async () => {
     const failing: UsageClient = {
+      accountInfo: { getAllowedBucketId: () => null },
       listBuckets: async () => {
         throw new Error('bad auth token')
       },

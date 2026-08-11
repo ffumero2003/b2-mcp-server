@@ -52,7 +52,12 @@ answers "what exists and what does it do."
   real environment beats the file, unreadable file rethrows. Uses mkdtemp so no
   .env fixture is ever committed. PROTECTED, see CLAUDE.md.
 - .env — NOT in the repo, gitignored, holds the user's real credentials. Never
-  read or written by any plan.
+  read or written by any plan. As of 2026-08-11 it holds the scoped
+  `b2-mcp-server` key, restricted to felipe-prompt-gate, WITHOUT listKeys.
+  It previously held the MASTER key, which .env.example forbids; rotating off it
+  is what exposed plan 009's bug and what let 008's listKeys pre-check refuse
+  for the first time. Rotation is verified by the key id's LENGTH (25 scoped,
+  12 master), never by reading the value.
 
 ## Plan 003 — list files in a bucket
 
@@ -216,3 +221,46 @@ answers "what exists and what does it do."
 - tests/keys.test.ts — 17 cases across mapping, expiry, bucket restrictions and
   listing. Includes the guard that no applicationKey field is emitted even when
   the source object carries one. Proposed for Protected files, not appended.
+
+## Plan 009 — scope-aware bucket listing
+
+- src/b2/scope.ts — listVisibleBuckets(client) returns {buckets,
+  scopedToBucketId}. Reads the authorized key's own restriction via
+  accountInfo.getAllowedBucketId() and, when restricted, lists with
+  {bucketId} instead of unfiltered. B2 401s an unfiltered b2_list_buckets from a
+  bucket-restricted key and listAllBucketNames does NOT exempt it, so this is
+  the single place that knows the rule. Passing {} would be unfiltered on the
+  wire and 401 identically, which is what the decoy test guards. Generic in the
+  bucket type because it reads no field off a handle. Reads the SINGULAR
+  allowed id; getAllowedBucketIds() exists but B2's console cannot create a
+  multi-bucket restriction today.
+- src/b2/buckets.ts — modified: listBuckets returns BucketListing
+  ({buckets, scopedToBucketId}) instead of a bare array, because an array had
+  nowhere to say a listing was narrowed. BucketLister is now
+  ScopedBucketLister<BucketHandle>.
+- src/b2/usage.ts — modified: the all-buckets branch goes through
+  listVisibleBuckets; UsageReport carries scopedToBucketId. It is null when the
+  caller NAMED a bucket, since nothing was silently narrowed in that case.
+- src/b2/keys.ts — modified: id-to-name resolution is scope-aware. Unreachable
+  for a key lacking listKeys, but a bucket-restricted key that HAS listKeys
+  would otherwise 401 before mapping a single key.
+- src/server.ts — modified: b2_list_buckets and b2_bucket_usage descriptions
+  state that a restricted key sees only its own bucket and reports which.
+- tests/scope.test.ts — 5 cases: restricted filters by id, unrestricted sends no
+  options, the reported scope matches both ways, and an SDK rejection
+  propagates. The decoy is the assertion that {} is never sent. PROTECTED,
+  appended to CLAUDE.md in the turn it was created.
+- tests/buckets.test.ts — modified: 4 existing cases moved to the object shape,
+  2 added for scopedToBucketId in both directions.
+- tests/usage.test.ts — modified: 2 cases ADDED (restricted scan reports its
+  bucket; unrestricted reports null). No existing case touched; the four decoys
+  stand.
+- tests/keys.test.ts — modified: 1 case ADDED, resolving names under a
+  restricted key. No existing case touched.
+
+Known gap this plan did NOT close, found during its own verification:
+B2Client.getBucket falls back to an UNFILTERED listBuckets when its filtered
+lookup finds nothing (SDK client.js:139-143), so any tool given a bucket name a
+restricted key cannot see returns a raw 401 instead of BucketNotFoundError.
+Pre-existing, invisible under the master key, and untouched by 009 because it
+lives inside the SDK call every bucket-scoped tool makes. See ROADMAP.md.

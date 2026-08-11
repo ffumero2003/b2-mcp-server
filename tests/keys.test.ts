@@ -34,8 +34,10 @@ function fakeClient(
   buckets: readonly { id: string; name: string }[] = [
     { id: BUCKET_ID, name: 'felipe-prompt-gate' },
   ],
+  allowedBucketId: string | null = null,
 ): KeyLister {
   return {
+    accountInfo: { getAllowedBucketId: () => allowedBucketId },
     paginateKeys: () => iterate(keys),
     listBuckets: async () => buckets,
   }
@@ -208,8 +210,21 @@ describe('listKeys - listing', () => {
     expect(listing.truncated).toBe(true)
   })
 
+  // Added by 009. This tool is reachable by a bucket-restricted key that DOES
+  // carry listKeys, and resolving names through an unfiltered listing would 401
+  // before any key was mapped.
+  it('resolves bucket names for a restricted key without an unfiltered listing', async () => {
+    const client = fakeClient([key({ bucketIds: [BUCKET_ID] })], undefined, BUCKET_ID)
+
+    const { keys } = await listKeys(client, NOW)
+
+    expect(keys[0]!.bucketNames).toEqual(['felipe-prompt-gate'])
+    expect(keys[0]!.bucketIds).toEqual([BUCKET_ID])
+  })
+
   it('propagates an SDK rejection instead of swallowing it', async () => {
     const failing: KeyLister = {
+      accountInfo: { getAllowedBucketId: () => null },
       paginateKeys: () => iterate([]),
       listBuckets: async () => {
         throw new Error('bad auth token')

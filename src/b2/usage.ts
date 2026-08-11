@@ -1,4 +1,5 @@
 import { BucketNotFoundError } from './files.js'
+import { listVisibleBuckets, type ScopedBucketLister } from './scope.js'
 
 /**
  * Budget a bucket is measured against when the caller names none.
@@ -31,12 +32,20 @@ export interface BucketUsage {
   readonly truncated: boolean
 }
 
-/** Usage across every bucket scanned. */
+/**
+ * Usage across every bucket scanned.
+ *
+ * scopedToBucketId is non-null when the authorized key is restricted to one
+ * bucket, so a whole-account scan covered only that bucket. Without it a
+ * restricted total reads as an account total, which is the kind of silent
+ * partial answer Established conventions forbids.
+ */
 export interface UsageReport {
   readonly buckets: BucketUsage[]
   readonly totalBytesUsed: number
   readonly totalBytesUsedHuman: string
   readonly anyTruncated: boolean
+  readonly scopedToBucketId: string | null
 }
 
 /** The fields this module reads off an SDK FileVersion. */
@@ -53,8 +62,7 @@ export interface UsageBucket {
 }
 
 /** The subset of B2Client this module needs. */
-export interface UsageClient {
-  listBuckets(): Promise<readonly UsageBucket[]>
+export interface UsageClient extends ScopedBucketLister<UsageBucket> {
   getBucket(bucketName: string): Promise<UsageBucket | null>
 }
 
@@ -182,8 +190,13 @@ export async function bucketUsage(
   const thresholdPercent = options.thresholdPercent ?? OVER_BUDGET_THRESHOLD * 100
 
   let targets: readonly UsageBucket[]
+  // Non-null only when the key is restricted, in which case the scan below
+  // covered one bucket and the report has to say so.
+  let scopedToBucketId: string | null = null
   if (options.bucketName === undefined) {
-    targets = await client.listBuckets()
+    const visible = await listVisibleBuckets(client)
+    targets = visible.buckets
+    scopedToBucketId = visible.scopedToBucketId
   } else {
     const one = await client.getBucket(options.bucketName)
     if (!one) {
@@ -205,5 +218,6 @@ export async function bucketUsage(
     totalBytesUsed,
     totalBytesUsedHuman: humanBytes(totalBytesUsed),
     anyTruncated: buckets.some((b) => b.truncated),
+    scopedToBucketId,
   }
 }

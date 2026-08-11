@@ -1,3 +1,5 @@
+import { listVisibleBuckets, type ScopedBucketLister } from './scope.js'
+
 /** Keys returned per call before the listing reports itself truncated. */
 export const MAX_KEYS = 1000
 
@@ -45,9 +47,9 @@ export interface ApplicationKeyLike {
 }
 
 /** The subset of B2Client this module needs. */
-export interface KeyLister {
+export interface KeyLister
+  extends ScopedBucketLister<{ readonly id: string; readonly name: string }> {
   paginateKeys(options?: { pageSize?: number }): AsyncIterableIterator<ApplicationKeyLike>
-  listBuckets(): Promise<readonly { readonly id: string; readonly name: string }[]>
 }
 
 /**
@@ -107,7 +109,11 @@ export async function listKeys(
   client: KeyLister,
   now: Date = new Date(),
 ): Promise<KeyListing> {
-  const buckets = await client.listBuckets()
+  // Scope-aware: an unfiltered listing 401s for a bucket-restricted key, which
+  // this tool can still be reached by when such a key carries listKeys. Names
+  // this key cannot see stay unresolved, which the mapper already handles by
+  // keeping the id and inventing no name.
+  const { buckets } = await listVisibleBuckets(client)
   const bucketNamesById = new Map(buckets.map((bucket) => [bucket.id, bucket.name]))
 
   const keys: KeySummary[] = []

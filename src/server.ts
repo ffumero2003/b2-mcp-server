@@ -62,7 +62,7 @@ export function createServer(): McpServer {
     {
       title: 'List B2 buckets',
       description:
-        'Lists every bucket in the configured Backblaze B2 account, as JSON objects with bucketId, bucketName, and bucketType.',
+        'Lists the buckets the configured application key can see, as JSON objects with bucketId, bucketName, and bucketType. A key restricted to one bucket sees only that bucket; the result reports scopedToBucketId so a narrowed listing is never mistaken for the whole account.',
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -333,7 +333,7 @@ export function createServer(): McpServer {
       title: 'Report bucket storage used against a budget',
       description:
         'Reports bytes stored per bucket and how that compares to a budget, flagging buckets over the threshold. B2 exposes no usage endpoint, so this is computed by summing every file version, INCLUDING old versions, which B2 also bills for. The figure EXCLUDES parts of unfinished large uploads, which B2 does bill for; those uploads are counted separately as unfinishedLargeFiles, so treat bytesUsed as a floor rather than a total. Omitting bucketName scans every bucket, which costs one transaction per ' +
-        `${PAGE_SIZE} versions per bucket and is the most expensive call this server makes. A scan is capped at ${MAX_PAGES_PER_BUCKET} pages per bucket and sets truncated when the cap stops it.`,
+        `${PAGE_SIZE} versions per bucket and is the most expensive call this server makes. A scan is capped at ${MAX_PAGES_PER_BUCKET} pages per bucket and sets truncated when the cap stops it. If the application key is restricted to one bucket, a whole-account scan covers only that bucket and reports scopedToBucketId, so the total is that bucket's rather than the account's.`,
       inputSchema: {
         bucketName: z
           .string()

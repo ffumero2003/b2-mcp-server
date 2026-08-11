@@ -32,6 +32,9 @@ engines >= 22.3.0. Pinned by .nvmrc and package.json engines.
 - `npm start` — node dist/server.js. Stdio MCP server.
 - `npm run dev` — tsx src/server.ts. Same, straight from source.
 
+Run `nvm use` first. The shell default may be older than the 22.3.0 floor, and
+the failure does not name the version.
+
 Tool names like b2_list_files are MCP tools, NOT shell commands. They exist only
 inside the running server. Define this helper once per terminal session:
 
@@ -45,7 +48,10 @@ inside the running server. Define this helper once per terminal session:
   `b2 b2_list_files --tool-arg bucketName=$BUCKET`, `b2 b2_bucket_usage` with no
   arguments to measure every bucket, and `b2 b2_list_keys`. Each argument needs
   its own --tool-arg. b2_list_keys needs a key carrying the listKeys capability
-  and says so plainly when the key lacks it.
+  and says so plainly when the key lacks it. Under a BUCKET-RESTRICTED key both
+  whole-account calls cover only that one bucket and report which, via
+  scopedToBucketId -- a narrowed listing must never read as a complete one.
+  Before 009 they did not cover it at all: they returned 401. See 009.
 - Write — b2_upload_file and b2_download_file need a Read and Write key plus
   their root set (B2_UPLOAD_ROOT to read from, B2_DOWNLOAD_ROOT to write to).
   b2_delete_file_version additionally REQUIRES B2_AUDIT_LOG, and honours
@@ -127,11 +133,17 @@ Never restate these rules inside a plan file — cite this section instead.
   diagnose why the prediction was wrong, and report the discrepancy before
   proposing a fix.
 - A guard whose failure path never fired is UNVERIFIED, and the plan says so
-  rather than implying full coverage. Three slices needed this: 005's
-  multi-bucket paths, 007's scan cap and multi-bucket totals, 008's capability
-  pre-check, which never refused because the key happened to carry listKeys.
+  rather than implying full coverage. Still untriggered: 005's multi-bucket
+  paths, 007's scan cap and multi-bucket totals, and 006's audit-log gate.
   Green tests plus a happy-path smoke check is not the same as a proven guard.
   Name the untriggered paths explicitly in the plan's verification record.
+- 008's capability pre-check is now VERIFIED, and how it got there is the point.
+  It sat untriggered not by chance but because the credential in .env was the
+  MASTER key, which carries every capability -- the guard could not fire, and
+  the record's "happened to carry listKeys" understated that. Rotating to a
+  scoped key made it refuse for real, with the predicted message, and in the
+  same session exposed plan 009's 401. An untriggered guard is not merely
+  unproven; it is a place where the setup, not the code, may be what is wrong.
 
   
 ## Rules
@@ -187,6 +199,16 @@ Never restate these rules inside a plan file — cite this section instead.
   no write-side logic, sitting in dist waiting to be imported by accident.
   Nothing failed and nothing warned. `npm run build` now purges dist first;
   never trust a build after a rename or delete without confirming it did.
+- Never assume a call that works under the master key works under a SCOPED key.
+  An unfiltered b2_list_buckets returns 401 for a bucket-restricted key, and the
+  listAllBucketNames capability does NOT exempt it. Three call sites shipped
+  that way behind 131 green tests, because a fake listBuckets() agrees with
+  whatever the caller does -- no fixture can catch an authorization rule. The
+  filtered form, listBuckets({bucketId}), works, which is why every
+  bucket-scoped tool was fine and only the two whole-account calls broke. This
+  is the same scar as the SDK's empty .message, one level up: not the shape of a
+  dependency's errors but the shape of its PERMISSIONS. Test with the credential
+  the docs tell people to use, not the one that happens to be in .env. From 009.
 - Never compare a path against a temp directory without realpath on macOS.
   /var is a symlink to /private/var, so mkdtemp returns "/var/..." while any
   fenced code returns "/private/var/...". This cost a failing test in 005, was
@@ -247,6 +269,13 @@ These are not "earned". They apply before the first line of code exists.
   guards the boundary that exactly MAX_PAGES_PER_BUCKET versions is a COMPLETE
   scan, not a truncated one. Nothing else in the repo would fail if the action
   filter started counting markers as data.
+- tests/scope.test.ts — the only regression coverage for the scoped-key 401
+  (plan 009). One case is a decoy whose removal leaves a green suite and the bug
+  restored: the assertion that a restricted key is listed with `{bucketId}` and
+  NOT with an empty options object. `listBuckets({})` is unfiltered on the wire
+  and 401s exactly as before, while a test that merely checks "listBuckets was
+  called" passes. Nothing else in the repo inspects the arguments that reach the
+  SDK, and no fixture can catch an authorization rule.
 - tests/keys.test.ts — the only guard that the key listing cannot leak a secret
   (plan 008). One case constructs a source object CARRYING an applicationKey
   field and asserts the mapper emits neither the field nor its value. Remove it

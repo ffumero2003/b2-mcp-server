@@ -44,8 +44,17 @@ when a language model is the one calling them.
 - **Partial results announce themselves.** Anything that can return less than
   the whole truth says so in the payload -- `truncated`/`nextFileName` on file
   listings, `truncated`/`anyTruncated`/`unfinishedLargeFiles` on usage,
-  `truncated` on key listings. A partial answer presented as a complete one is
-  worse than a refusal, because the caller cannot tell.
+  `truncated` on key listings, and `scopedToBucketId` when the application key's
+  own restriction narrowed a whole-account listing to a single bucket. A partial
+  answer presented as a complete one is worse than a refusal, because the caller
+  cannot tell.
+- **Least-privilege keys are the tested path, not an afterthought.** B2 rejects
+  an unfiltered `b2_list_buckets` from a bucket-restricted key with a 401, and
+  the `listAllBucketNames` capability does not exempt it -- so a server that
+  only ever ran on a master key would ship broken for the credential its own
+  docs mandate. That is exactly what happened here, and it was caught by
+  rotating the key rather than by any test: a fake `listBuckets()` agrees with
+  whatever the caller does, so no fixture can catch an authorization rule.
 - **Downloads are written atomically.** Bytes go to `<target>.<pid>.partial`,
   are counted and length-checked, and are renamed onto the target only on a
   match. The SDK documents that a checksum failure errors the stream *after*
@@ -69,7 +78,9 @@ not a B2 concept.
 ## Requirements
 
 Node >= 22.3.0. This is a hard floor, not a preference -- the B2 SDK declares
-it in `engines`. Pinned by `.nvmrc`.
+it in `engines`. Pinned by `.nvmrc`, so run `nvm use` first if your shell
+default is older; every command below fails on Node 20 and the failure does not
+mention the version.
 
 ## Setup
 
@@ -156,7 +167,7 @@ root.
 
 | Tool | Read/write | What it does |
 | --- | --- | --- |
-| `b2_list_buckets` | read | Every bucket, with id, name, and type. |
+| `b2_list_buckets` | read | The buckets the key can see, with id, name, and type, plus `scopedToBucketId` when the key is restricted to one. |
 | `b2_list_files` | read | One page of current files in a bucket, optional `prefix` and `limit`, with `truncated`/`nextFileName`. |
 | `b2_upload_file` | write | Uploads from `B2_UPLOAD_ROOT` into a bucket. Adds a version rather than replacing. |
 | `b2_download_file` | write (local) | Downloads to `B2_DOWNLOAD_ROOT`, atomically. Returns the path and SHA-1, never the content. Will not replace an existing file unless `overwrite` is true. |

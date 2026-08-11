@@ -9,8 +9,23 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-EMPTY. Every committed item has shipped, which is this project's definition of
-done (CLAUDE.md > Workflow conventions). Items below in Possible never block it.
+- 010 - BucketNotFoundError is unreachable for a bucket-restricted key.
+  B2Client.getBucket falls back to an UNFILTERED listBuckets when its filtered
+  lookup misses (SDK client.js:139-143), so naming a bucket the key cannot see
+  returns a raw "BadAuthTokenError (unauthorized) HTTP 401" instead of "No
+  bucket named X in this account". Affects every bucket-scoped tool:
+  list_files, upload, download, hide, unhide, delete, single-bucket usage.
+  Pre-existing and invisible under the master key; found during 009's
+  verification. Fix direction: a getVisibleBucket() in src/b2/scope.ts that
+  calls listBuckets({bucketName}) and treats an empty result as not-found,
+  never falling through to the unfiltered call, then routing the five modules
+  that call client.getBucket through it. Same root cause as 009, different call
+  site, and it undoes the 001 lesson about legible errors if left.
+
+This list was EMPTY as of 008, and reopening it is deliberate rather than a
+regression in bookkeeping. Done means an empty Planned list (CLAUDE.md >
+Workflow conventions), and a product that fails under its own documented
+credential is not done. Items below in Possible never block it.
 
 ## Possible — noted, not committed
 
@@ -35,6 +50,9 @@ Grouped by kind so a future session can pick sensibly. Nothing here blocks done.
 ### Small polish — cheap, self-contained
 
 - bucketId / bucketName / bucketTypes filters on b2_list_buckets. (parked by 001)
+  PARTLY SUBSUMED by 009, which uses the bucketId filter internally to honour a
+  key's own restriction. What stays parked is exposing these as caller-facing
+  tool arguments, which 009 deliberately does not do.
 - Generalise the capability pre-check. 008 used B2Client.hasCapabilities() for
   b2_list_keys alone; applying it across all nine tools would turn every
   permission failure into "this key cannot do that" instead of a B2 error.
@@ -70,6 +88,14 @@ Grouped by kind so a future session can pick sensibly. Nothing here blocks done.
 
 ## Done
 
+- Scope-aware bucket listing. (009) b2_list_buckets and the all-bucket
+  b2_bucket_usage scan work under a bucket-restricted key, which .env.example
+  mandates and which used to 401 both. A narrowed listing reports
+  scopedToBucketId rather than passing one bucket off as the account. Verified
+  against the real account: both calls went from 401 to the one visible bucket,
+  and the scoped scan's 33,204,199 bytes over 116 versions matches the filtered
+  single-bucket call exactly. Exposed a second, separate hole inside the SDK's
+  getBucket, now Planned as 010.
 - List buckets over MCP: stdio server exposing b2_list_buckets. (001)
 - .env file loading. (002) Landed with ZERO dependencies: Node 22's built-in
   process.loadEnvFile replaced the planned dotenv package.
