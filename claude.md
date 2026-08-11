@@ -210,7 +210,12 @@ Never restate these rules inside a plan file — cite this section instead.
   bucket-scoped tool was fine and only the two whole-account calls broke. This
   is the same scar as the SDK's empty .message, one level up: not the shape of a
   dependency's errors but the shape of its PERMISSIONS. Test with the credential
-  the docs tell people to use, not the one that happens to be in .env. From 009.
+  the docs tell people to use, not the one that happens to be in .env. And check
+  what the DEPENDENCY does on the same path: 009 fixed this project's three
+  unfiltered calls, and a fourth was hiding inside B2Client.getBucket, which
+  falls back to an unfiltered listBuckets when its filtered lookup misses. That
+  turned every "no such bucket" into "unauthorized" for seven tools. Your call
+  sites being clean is not the same as the call being clean. From 009 and 010.
 - Never compare a path against a temp directory without realpath on macOS.
   /var is a symlink to /private/var, so mkdtemp returns "/var/..." while any
   fenced code returns "/private/var/...". This cost a failing test in 005, was
@@ -277,7 +282,9 @@ These are not "earned". They apply before the first line of code exists.
   NOT with an empty options object. `listBuckets({})` is unfiltered on the wire
   and 401s exactly as before, while a test that merely checks "listBuckets was
   called" passes. Nothing else in the repo inspects the arguments that reach the
-  SDK, and no fixture can catch an authorization rule.
+  SDK, and no fixture can catch an authorization rule. A second decoy from 010:
+  an unknown bucket name must cost exactly ONE listBuckets call, because a
+  second is the SDK's unfiltered fallback returning and the 401 with it.
 - tests/keys.test.ts — the only guard that the key listing cannot leak a secret
   (plan 008). One case constructs a source object CARRYING an applicationKey
   field and asserts the mapper emits neither the field nor its value. Remove it

@@ -9,23 +9,28 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-- 010 - BucketNotFoundError is unreachable for a bucket-restricted key.
-  B2Client.getBucket falls back to an UNFILTERED listBuckets when its filtered
-  lookup misses (SDK client.js:139-143), so naming a bucket the key cannot see
-  returns a raw "BadAuthTokenError (unauthorized) HTTP 401" instead of "No
-  bucket named X in this account". Affects every bucket-scoped tool:
-  list_files, upload, download, hide, unhide, delete, single-bucket usage.
-  Pre-existing and invisible under the master key; found during 009's
-  verification. Fix direction: a getVisibleBucket() in src/b2/scope.ts that
-  calls listBuckets({bucketName}) and treats an empty result as not-found,
-  never falling through to the unfiltered call, then routing the five modules
-  that call client.getBucket through it. Same root cause as 009, different call
-  site, and it undoes the 001 lesson about legible errors if left.
+Every plan in the project, in order, so a reader can find the right file without
+opening ten of them. SHIPPED means the plan landed and was verified against the
+real account; TO DO is what "done" is still waiting on. Done means nothing in
+this list is TO DO (CLAUDE.md > Workflow conventions). Detail on each shipped
+item, including what its verification actually proved, is under Done below.
 
-This list was EMPTY as of 008, and reopening it is deliberate rather than a
-regression in bookkeeping. Done means an empty Planned list (CLAUDE.md >
-Workflow conventions), and a product that fails under its own documented
-credential is not done. Items below in Possible never block it.
+| Plan | File | What it does | Status |
+| --- | --- | --- | --- |
+| 001 | 001-list-buckets.md | Stdio MCP server exposing b2_list_buckets. Fixed the SDK's blank .message. | SHIPPED |
+| 002 | 002-dotenv.md | Credentials from .env, zero dependencies via Node 22's process.loadEnvFile. | SHIPPED |
+| 003 | 003-list-files.md | b2_list_files: one page, optional prefix and limit, truncated/nextFileName. | SHIPPED |
+| 004 | 004-upload-file.md | b2_upload_file, and the containment fence, denied by default. | SHIPPED |
+| 005 | 005-download-file.md | b2_download_file, the fence generalised to writes, atomic temp-file writes. | SHIPPED |
+| 006 | 006-delete-file.md | b2_hide_file, b2_unhide_file, b2_delete_file_version, with a mandatory audit log. | SHIPPED |
+| 007 | 007-bucket-usage.md | b2_bucket_usage: bytes summed from versions against a budget B2 cannot report. | SHIPPED |
+| 008 | 008-list-keys.md | b2_list_keys, with all nine fields enumerated so no secret can leak. | SHIPPED |
+| 009 | 009-scope-aware-bucket-listing.md | Unfiltered listBuckets 401s under a bucket-restricted key; three call sites fixed. | SHIPPED |
+| 010 | 010-visible-bucket-lookup.md | The SDK's getBucket fallback turned "no such bucket" into "unauthorized". | SHIPPED |
+
+Nothing is TO DO. The list was empty at 008, reopened for 009 and 010 when
+rotating onto the credential .env.example mandates showed the product did not
+work under it, and is empty again. Items in Possible never block done.
 
 ## Possible — noted, not committed
 
@@ -88,6 +93,20 @@ Grouped by kind so a future session can pick sensibly. Nothing here blocks done.
 
 ## Done
 
+Detail per plan. The index above is for navigation; this is the record of what
+each slice proved.
+
+- Visible bucket lookup. (010) B2Client.getBucket falls back to an UNFILTERED
+  listBuckets when its filtered lookup misses (SDK client.js:139-143), which
+  401s for a bucket-restricted key -- so every "no such bucket" read as
+  "unauthorized" and BucketNotFoundError was unreachable under the credential
+  .env.example mandates. Fixed at the single point the client is constructed
+  rather than in the five modules that call getBucket. The restricted branch
+  never sends a foreign bucket name to B2, because that request is the one that
+  fails. Verified against the real account: b2_list_files and b2_upload_file on
+  an unknown name both went from HTTP 401 to "No bucket named no-such-bucket in
+  this account", with the valid-bucket paths unchanged at 116 files /
+  33,204,199 bytes.
 - Scope-aware bucket listing. (009) b2_list_buckets and the all-bucket
   b2_bucket_usage scan work under a bucket-restricted key, which .env.example
   mandates and which used to 401 both. A narrowed listing reports

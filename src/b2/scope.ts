@@ -27,8 +27,18 @@ export interface ScopedBucketLister<TBucket> {
   readonly accountInfo: {
     getAllowedBucketId(): string | null
   }
-  listBuckets(options?: { bucketId?: string }): Promise<readonly TBucket[]>
+  listBuckets(options?: {
+    bucketId?: string
+    bucketName?: string
+  }): Promise<readonly TBucket[]>
 }
+
+/**
+ * A lister whose buckets carry a name, which resolving one by name requires.
+ * Separate from ScopedBucketLister because listing needs no field at all.
+ */
+export interface ScopedBucketFinder<TBucket extends { readonly name: string }>
+  extends ScopedBucketLister<TBucket> {}
 
 /**
  * Lists the buckets this key is actually allowed to see, filtering by the key's
@@ -56,4 +66,36 @@ export async function listVisibleBuckets<TBucket>(
       : await client.listBuckets({ bucketId: scopedToBucketId })
 
   return { buckets, scopedToBucketId }
+}
+
+/**
+ * Resolves one bucket by name without ever making a request B2 would reject.
+ *
+ * Replaces B2Client.getBucket, which falls back to an UNFILTERED listBuckets
+ * when its filtered lookup misses (dist/client.js:139-143). That fallback 401s
+ * for a bucket-restricted key, so every "no such bucket" became "unauthorized"
+ * and BucketNotFoundError became unreachable. See plan 010.
+ *
+ * The restricted branch deliberately does NOT send the caller's bucketName to
+ * B2: asking a restricted key about a bucket it is not allowed to see is
+ * exactly the request that fails. Filtering by the key's OWN allowed id always
+ * succeeds, and the name is compared here on the single bucket that comes back.
+ *
+ * Returns null for a bucket that does not exist AND for one this key cannot
+ * see. That conflation is intentional: telling a caller a bucket exists but is
+ * off-limits would leak the account's shape to a key scoped away from it.
+ */
+export async function getVisibleBucket<TBucket extends { readonly name: string }>(
+  client: ScopedBucketFinder<TBucket>,
+  bucketName: string,
+): Promise<TBucket | null> {
+  const allowedBucketId = client.accountInfo.getAllowedBucketId()
+
+  if (allowedBucketId === null) {
+    const [match] = await client.listBuckets({ bucketName })
+    return match ?? null
+  }
+
+  const [allowed] = await client.listBuckets({ bucketId: allowedBucketId })
+  return allowed !== undefined && allowed.name === bucketName ? allowed : null
 }

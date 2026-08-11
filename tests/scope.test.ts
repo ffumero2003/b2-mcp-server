@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { listVisibleBuckets, type ScopedBucketLister } from '../src/b2/scope.js'
+import {
+  getVisibleBucket,
+  listVisibleBuckets,
+  type ScopedBucketLister,
+} from '../src/b2/scope.js'
 
 /** A bucket reduced to what these cases care about. */
 interface TestBucket {
@@ -21,9 +25,15 @@ function recordingClient(
   return {
     calls,
     accountInfo: { getAllowedBucketId: () => allowedBucketId },
-    listBuckets: async (options?: { bucketId?: string }) => {
+    listBuckets: async (options?: { bucketId?: string; bucketName?: string }) => {
       calls.push(options)
-      return buckets
+      // Filters the way B2 does, so "no match" is a real empty result rather
+      // than something the fake decided.
+      return buckets.filter(
+        (b) =>
+          (options?.bucketId === undefined || b.id === options.bucketId) &&
+          (options?.bucketName === undefined || b.name === options.bucketName),
+      )
     },
   }
 }
@@ -82,5 +92,53 @@ describe('listVisibleBuckets', () => {
     }
 
     await expect(listVisibleBuckets(failing)).rejects.toThrow('bad auth token')
+  })
+})
+
+describe('getVisibleBucket', () => {
+  const buckets = [
+    { id: 'id-a', name: 'alpha' },
+    { id: 'id-b', name: 'bravo' },
+  ]
+
+  it('finds a bucket by name for an unrestricted key', async () => {
+    const client = recordingClient(null, buckets)
+
+    await expect(getVisibleBucket(client, 'bravo')).resolves.toEqual({
+      id: 'id-b',
+      name: 'bravo',
+    })
+    expect(client.calls).toEqual([{ bucketName: 'bravo' }])
+  })
+
+  // DECOY, per CLAUDE.md > Protected files. A miss must cost exactly ONE call.
+  // A second one is the SDK's unfiltered fallback returning -- the whole of
+  // plan 010 -- and no other test in the repo counts calls.
+  it('returns null for an unknown name in a single call, never a second lookup', async () => {
+    const client = recordingClient(null, buckets)
+
+    await expect(getVisibleBucket(client, 'no-such-bucket')).resolves.toBeNull()
+    expect(client.calls).toHaveLength(1)
+    expect(client.calls).not.toContainEqual(undefined)
+  })
+
+  it('finds its own bucket for a restricted key, filtering by the allowed id', async () => {
+    const client = recordingClient('id-a', buckets)
+
+    await expect(getVisibleBucket(client, 'alpha')).resolves.toEqual({
+      id: 'id-a',
+      name: 'alpha',
+    })
+    expect(client.calls).toEqual([{ bucketId: 'id-a' }])
+  })
+
+  it('never asks B2 about a bucket a restricted key may not see', async () => {
+    const client = recordingClient('id-a', buckets)
+
+    // bravo exists, but this key is confined to alpha. Sending bucketName=bravo
+    // is the request B2 answers with 401, so it must never leave the process.
+    await expect(getVisibleBucket(client, 'bravo')).resolves.toBeNull()
+    expect(client.calls).toEqual([{ bucketId: 'id-a' }])
+    expect(JSON.stringify(client.calls)).not.toContain('bravo')
   })
 })

@@ -263,4 +263,30 @@ B2Client.getBucket falls back to an UNFILTERED listBuckets when its filtered
 lookup finds nothing (SDK client.js:139-143), so any tool given a bucket name a
 restricted key cannot see returns a raw 401 instead of BucketNotFoundError.
 Pre-existing, invisible under the master key, and untouched by 009 because it
-lives inside the SDK call every bucket-scoped tool makes. See ROADMAP.md.
+lives inside the SDK call every bucket-scoped tool makes. CLOSED by 010.
+
+## Plan 010 — visible bucket lookup
+
+- src/b2/scope.ts — modified: adds getVisibleBucket(client, bucketName) beside
+  listVisibleBuckets, keeping every scoped-call rule in one module. Unrestricted
+  keys filter by name; restricted keys filter by their OWN allowed id and
+  compare the name locally, so the caller's bucketName never reaches B2 when the
+  key is confined -- that request is exactly the one B2 answers with 401.
+  Neither branch ever lists unfiltered. Returns null for a bucket that does not
+  exist AND one this key cannot see, deliberately conflated so a scoped key
+  cannot map the account's shape. ScopedBucketFinder adds the name constraint
+  the comparison needs; ScopedBucketLister stays unconstrained since listing
+  reads no field.
+- src/b2/client.ts — modified: after authorize, overrides the instance's
+  getBucket with getVisibleBucket. A deliberate patch of third-party behavior,
+  commented as such with the SDK line numbers so it is not "cleaned up". Safe as
+  an own-property override because B2Client declares all fields publicly and
+  uses no #private fields, so `this` stays bound to the real client. Chosen over
+  threading scope through files/upload/download/delete/usage, which would have
+  added `name` to four structural types and churned four test files including a
+  protected one, to fix a bug none of them cause.
+- tests/scope.test.ts — modified: 4 cases ADDED for getVisibleBucket, existing
+  cases untouched. Its fake now filters the way B2 does, so "no match" is a real
+  empty result rather than something the fake decided. Second decoy: an unknown
+  name must cost exactly ONE listBuckets call, since a second is the SDK's
+  unfiltered fallback returning. PROTECTED.
