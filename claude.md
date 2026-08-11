@@ -42,9 +42,10 @@ inside the running server. Define this helper once per terminal session:
 - List every tool and its schema — `npx @modelcontextprotocol/inspector --cli
   npm run dev --method tools/list`
 - Read — `b2 b2_list_buckets`,
-  `b2 b2_list_files --tool-arg bucketName=$BUCKET`, and `b2 b2_bucket_usage`
-  with no arguments to measure every bucket. Each argument needs its own
-  --tool-arg.
+  `b2 b2_list_files --tool-arg bucketName=$BUCKET`, `b2 b2_bucket_usage` with no
+  arguments to measure every bucket, and `b2 b2_list_keys`. Each argument needs
+  its own --tool-arg. b2_list_keys needs a key carrying the listKeys capability
+  and says so plainly when the key lacks it.
 - Write — b2_upload_file and b2_download_file need a Read and Write key plus
   their root set (B2_UPLOAD_ROOT to read from, B2_DOWNLOAD_ROOT to write to).
   b2_delete_file_version additionally REQUIRES B2_AUDIT_LOG, and honours
@@ -76,6 +77,14 @@ inside the running server. Define this helper once per terminal session:
   Expect usage >= that sum, with the difference accounted for by old versions.
   A usage figure BELOW the sum means the action filter is wrong -- and no
   fixture can catch that, because a fixture agrees with whatever the filter does.
+- Key-listing secret check — b2_list_keys must emit exactly nine fields and no
+  bare `applicationKey`. Run it against the real account and enumerate what
+  came back, rather than trusting a fixture:
+  `b2 b2_list_keys` piped through a check that collects Object.keys of every
+  entry. Expect applicationKeyId, bucketIds, bucketNames, capabilities, expired,
+  expiresAt, keyName, namePrefix, options -- and NOTHING named applicationKey.
+  B2 returns a key secret only from createKey, which this server never calls,
+  but the check is against the mapper regressing, not against B2.
 
 ## Verification
 
@@ -117,6 +126,12 @@ Never restate these rules inside a plan file — cite this section instead.
   to fix quietly — it means the design or an existing test was wrong. Stop,
   diagnose why the prediction was wrong, and report the discrepancy before
   proposing a fix.
+- A guard whose failure path never fired is UNVERIFIED, and the plan says so
+  rather than implying full coverage. Three slices needed this: 005's
+  multi-bucket paths, 007's scan cap and multi-bucket totals, 008's capability
+  pre-check, which never refused because the key happened to carry listKeys.
+  Green tests plus a happy-path smoke check is not the same as a proven guard.
+  Name the untriggered paths explicitly in the plan's verification record.
 
   
 ## Rules
@@ -142,6 +157,15 @@ Never restate these rules inside a plan file — cite this section instead.
   record can be written, and writes INTENT before acting and OUTCOME after,
   success or failure: a log that can miss events is not a log. From 006; see
   src/b2/delete.ts and src/audit-log.ts.
+- A boundary where a secret could appear ENUMERATES its output fields and never
+  spreads a third-party object across it. src/b2/keys.ts names all nine fields
+  it emits; it does not spread the SDK's ApplicationKey, even though that type
+  carries no secret today. The guarantee then does not depend on the dependency
+  never changing: if a future SDK adds a secret-bearing field to a list
+  response, it cannot reach a client by accident. This generalises the Summary
+  types convention into a hard requirement wherever credentials are in scope --
+  which is exactly where key CREATION sits, still parked on ROADMAP.md for this
+  reason. From 008; see src/b2/keys.ts.
 
 ## What NOT to do
 
@@ -223,6 +247,12 @@ These are not "earned". They apply before the first line of code exists.
   guards the boundary that exactly MAX_PAGES_PER_BUCKET versions is a COMPLETE
   scan, not a truncated one. Nothing else in the repo would fail if the action
   filter started counting markers as data.
+- tests/keys.test.ts — the only guard that the key listing cannot leak a secret
+  (plan 008). One case constructs a source object CARRYING an applicationKey
+  field and asserts the mapper emits neither the field nor its value. Remove it
+  and a later refactor to `{...key}` passes the suite while turning the one tool
+  that touches credentials into a leak. A second case guards the exclusion of
+  the SDK's deprecated bucketId.
 
 ### Adding to this list is PRE-APPROVED
 
@@ -314,8 +344,10 @@ what THIS slice does differently from the convention, if anything.
 - Defaulted-collaborator parameter — a collaborator (an env map, a filesystem
   root) is a parameter with a default, so tests substitute it without touching
   global state and production callers pass nothing. Used by
-  loadConfig(env = process.env) in 001 and loadDotEnv(root = packageRoot()) in
-  002. Cite by name; do not re-describe.
+  loadConfig(env = process.env) in 001, loadDotEnv(root = packageRoot()) in 002,
+  and listKeys(client, now = new Date()) in 008, which makes an expiry
+  computation testable without mocking the clock. Cite by name; do not
+  re-describe.
 - Error results, never throws, across the MCP boundary — a tool handler catches
   everything and returns { isError: true, content: [...] }. A throw tears down
   the stdio session; a result lets the client read the reason and explain it.
@@ -327,12 +359,14 @@ what THIS slice does differently from the convention, if anything.
 - Summary types at the MCP boundary — an SDK handle or response is flattened
   into a plain interface of primitives before it crosses to a client
   (BucketSummary 001, FileSummary 003, UploadReceipt 004, DownloadReceipt 005,
-  Hide/Unhide/DeleteReceipt 006, BucketUsage 007). SDK objects carry
+  Hide/Unhide/DeleteReceipt 006, BucketUsage 007, KeySummary 008). SDK objects
+  carry
   methods and a live client reference that cannot serialize, and an explicit
   field list keeps unplanned fields out of tool output. Name it <Thing>Summary
   or <Thing>Receipt.
 - Deterministic order is ours, not the API's — a listing sorts explicitly before
-  returning (bucketName 001, fileName 003, bucketName again 007), even when the
+  returning (bucketName 001, fileName 003, bucketName again 007, keyName 008),
+  even when the
   API appears to return sorted results. One localeCompare costs nothing and removes a dependency on
   unverified behavior, per What NOT to do.
 - Tool registration shape — every tool is registered with a zod inputSchema
@@ -341,8 +375,8 @@ what THIS slice does differently from the convention, if anything.
   core function and returns JSON.stringify(result, null, 2) as text. Errors are
   caught per Error results, never throws. Used by b2_list_buckets 001,
   b2_list_files 003, b2_upload_file 004, b2_download_file 005, and the three
-  mutation tools in 006, b2_bucket_usage 007 -- eight tools, all following this
-  shape.
+  mutation tools in 006, b2_bucket_usage 007, b2_list_keys 008 -- nine tools,
+  all following this shape.
 - Atomic write via temp file and rename — a stream is written to
   "<target>.<pid>.partial", counted, verified against the expected length, and
   renamed onto the target only when it matches; any failure removes the temp
@@ -354,7 +388,8 @@ what THIS slice does differently from the convention, if anything.
   whole truth says so in the result, never by omission. b2_list_files carries
   truncated and nextFileName when a page is capped (003); b2_bucket_usage
   carries truncated per bucket, anyTruncated overall, and unfinishedLargeFiles
-  for billed bytes it cannot sum (007). A partial answer presented as a complete
+  for billed bytes it cannot sum (007); b2_list_keys carries truncated at
+  MAX_KEYS (008). A partial answer presented as a complete
   one is worse than refusing, because the caller cannot tell.
 - Policy constants in code, overridable per call — limits, budgets and
   thresholds are named module constants, not environment variables, because a

@@ -10,6 +10,8 @@ import { uploadFile } from './b2/upload.js'
 import { downloadFile } from './b2/download.js'
 import { deleteFileVersion, hideFile, unhideFile } from './b2/delete.js'
 import { MAX_PAGES_PER_BUCKET, PAGE_SIZE, bucketUsage } from './b2/usage.js'
+import { Capability } from '@backblaze-labs/b2-sdk'
+import { listKeys } from './b2/keys.js'
 import { loadConfig } from './config.js'
 import { loadDotEnv } from './env-file.js'
 
@@ -363,6 +365,48 @@ export function createServer(): McpServer {
         })
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
+        }
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: toMessage(error) }],
+        }
+      }
+    },
+  )
+
+  server.registerTool(
+    'b2_list_keys',
+    {
+      title: 'List B2 application keys',
+      description:
+        'Lists the application keys on the account with their capabilities, bucket restrictions, name prefix, and expiry. Contains NO key secrets: B2 returns a secret only when a key is created, and this server never creates keys. It does reveal what each key is permitted to do. Requires a key carrying the listKeys capability; a key scoped only to file operations will be told so.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      try {
+        const client = await getClient(loadConfig())
+
+        // Fail fast with a legible reason. The SDK provides this precisely so a
+        // caller avoids a generic 401/403, and key management is the capability
+        // a file-scoped key is most likely to be missing.
+        const check = client.hasCapabilities([Capability.ListKeys])
+        if (!check.ok) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text: `This application key cannot list keys: missing capability ${check.missing.join(', ')}. Create a key with the listKeys capability in the Backblaze console.`,
+              },
+            ],
+          }
+        }
+
+        const listing = await listKeys(client)
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(listing, null, 2) }],
         }
       } catch (error) {
         return {

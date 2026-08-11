@@ -192,3 +192,27 @@ answers "what exists and what does it do."
   bytes (including the three exclusions and old-version accounting), budget and
   threshold boundaries, bucket selection, and the scan cap (including the
   exactly-on-the-cap case that must NOT report truncated).
+
+## Plan 008 — list application keys
+
+- src/b2/keys.ts — listKeys(client, now) returns {keys, truncated}, sorted by
+  keyName. The mapper NAMES all nine emitted fields and spreads nothing from the
+  SDK object: the B2 list response carries no secret today (ApplicationKey has
+  no such field, unlike the FullApplicationKey only createKey returns), and
+  enumerating means that guarantee does not depend on the SDK never changing.
+  Bucket ids are resolved to NAMES via one listBuckets call; an id that does not
+  resolve keeps its place in bucketIds and contributes no name, so a restriction
+  is never invented nor silently dropped. The deprecated singular bucketId is
+  excluded. expirationTimestamp becomes ISO 8601 expiresAt plus a derived
+  expired boolean, so "which keys expired" needs no date arithmetic from a
+  model. `now` is a defaulted collaborator so expiry is testable without mocking
+  the clock. MAX_KEYS 1000, with exactly-the-cap complete and one past it
+  truncated.
+- src/server.ts — modified: registers a ninth tool, b2_list_keys, and is the
+  only handler that pre-checks a capability. hasCapabilities([Capability.
+  ListKeys]) turns a would-be 401 into a message naming what the key is missing.
+  This is a NARROW use of the capability-gating idea still parked on ROADMAP.md:
+  applied to the one tool most likely to hit a capability wall, not generalised.
+- tests/keys.test.ts — 17 cases across mapping, expiry, bucket restrictions and
+  listing. Includes the guard that no applicationKey field is emitted even when
+  the source object carries one. Proposed for Protected files, not appended.

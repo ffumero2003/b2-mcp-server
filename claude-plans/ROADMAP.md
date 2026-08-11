@@ -9,23 +9,52 @@ several plans becomes that many lines.
 
 ## Planned — committed for this version
 
-- 008 - b2_list_keys: list application keys with their capabilities and
-  restrictions. Wraps B2Client.listKeys, whose response contains NO secrets.
+EMPTY. Every committed item has shipped, which is this project's definition of
+done (CLAUDE.md > Workflow conventions). Items below in Possible never block it.
 
 ## Possible — noted, not committed
+
+Grouped by kind so a future session can pick sensibly. Nothing here blocks done.
+
+### Completes what shipped — gaps the finished product reveals
+
+- b2_list_file_versions: list ALL versions of a file, not just current ones.
+  THE REAL HOLE IN v1, found by using the product rather than reading it.
+  b2_bucket_usage counts every version the account is billed for, and
+  b2_list_files (listFileNames) shows only current ones, so the tool can say
+  "you are paying for 91 versions across 90 files" and offer no way to see the
+  difference. Worse, verified empirically during close-out: deleting a current
+  version PROMOTES the next-oldest to current, so old versions are reachable
+  only by destroying the newer ones. Discovery is currently destructive-only.
+  The SDK already has what a fix needs -- Bucket.listFileVersions and
+  paginateFileVersions, both already used by src/b2/usage.ts.
+- Deleting all versions of a name in one call. Depends on the above: you cannot
+  safely delete what you cannot enumerate. Bucket.deleteAll and deleteMany
+  exist in the SDK.
+
+### Small polish — cheap, self-contained
+
+- bucketId / bucketName / bucketTypes filters on b2_list_buckets. (parked by 001)
+- Generalise the capability pre-check. 008 used B2Client.hasCapabilities() for
+  b2_list_keys alone; applying it across all nine tools would turn every
+  permission failure into "this key cannot do that" instead of a B2 error.
+
+### New capability — real features, real design work
 
 - Application key CREATION and deletion. BLOCKER: B2Client.createKey returns
   FullApplicationKey.applicationKey -- the live secret, documented in the SDK
   as "only available in the b2_create_key response". As tool output that lands
   in the model's context window and the conversation transcript. Needs a design
   answer that keeps the secret out of tool output (write it to a gitignored
-  file and return only the keyID?) before it can be Planned. (parked by 001,
-  demoted from Planned when the return shape was checked)
-- bucketId / bucketName / bucketTypes filters on b2_list_buckets. (parked by 001)
-- Capability-gating tools with B2Client.hasCapabilities(), so a read-only key
-  reports "this key cannot do that" instead of failing at the API boundary.
+  file and return only the keyID?) before it can be Planned. CLAUDE.md > Rules
+  now carries the constraint any such design must satisfy: a boundary where a
+  secret could appear enumerates its fields and never spreads a third-party
+  object. (parked by 001, demoted from Planned when the return shape was checked)
 - Bucket lifecycle rules, replication, and notification rules. The SDK exposes
   all three on Bucket; none serve the Overview's stated purpose.
+
+### Changes the deployment model — biggest, least certain
+
 - HTTP/SSE transport alongside stdio. (parked by 001)
 - Named credential profiles, for one operator with several B2 accounts. Tools
   would take a profile NAME, never a secret. (parked by 001)
@@ -49,6 +78,14 @@ several plans becomes that many lines.
 - b2_upload_file: first write tool. Local reads are confined to B2_UPLOAD_ROOT,
   denied by default, with realpath resolution before the containment check.
   (004)
+- b2_list_keys. (008) THE LAST PLANNED ITEM. Lists keys with capabilities,
+  bucket restrictions resolved from ids to NAMES, and derived expiry. The
+  mapper enumerates all nine emitted fields rather than spreading the SDK
+  object, so a future SDK adding a secret to the list response cannot leak it.
+  Verified against real B2 output: no bare applicationKey field, no deprecated
+  bucketId. A narrow use of hasCapabilities() gives a legible refusal when a
+  key lacks listKeys -- though the current key HAS it, so that path is untested
+  against a real refusal.
 - b2_bucket_usage. (007) Answers the Overview's headline question, which B2
   itself cannot: there is no usage endpoint, so bytes are summed from file
   versions, INCLUDING old ones since B2 bills for them. hide, folder and start
