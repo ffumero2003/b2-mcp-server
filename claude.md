@@ -159,6 +159,19 @@ Never restate these rules inside a plan file — cite this section instead.
   `B2_AUDIT_LOG= <full npx command>` rather than by editing .env, which is
   protected and easy to leave in the wrong state -- shell values win over the
   file (env-file.ts:24-27) and an empty one is preserved.
+- 004/005's path fence is now VERIFIED against the running server, in three
+  forms, each returning `Path is outside the permitted directory: <candidate>`
+  and naming neither the root nor the resolved path:
+  `b2 b2_upload_file --tool-arg bucketName=$BUCKET --tool-arg localPath=X` for
+  X = /etc/passwd (absolute, outside), ../../../../etc/passwd (traversal), and
+  ../uploads-evil/x.txt (the sibling-prefix trap a bare startsWith admits).
+  What prompted it is the lesson: a Claude Desktop demo asked for /etc/passwd
+  and the MODEL refused on its own reasoning -- "a system file you don't want in
+  cloud storage" -- without necessarily calling the tool at all. Desktop's logs
+  elide tool arguments, so nothing on the machine distinguished "the fence
+  refused" from "the tool was never called". A model declining is not a guard
+  firing, and a refusal you did not cause proves nothing about the code. Drive
+  the guard directly, through a client that shows you the arguments.
 
   
 ## Rules
@@ -178,9 +191,15 @@ Never restate these rules inside a plan file — cite this section instead.
 - A tool that destroys data takes the EXACT identifier of the thing destroyed
   and never resolves it from a friendlier name. b2_delete_file_version requires
   a fileId and refuses to look one up from a file name, so "delete hello.txt"
-  cannot be satisfied in one step: the id has to come from a listing a human
-  can see. A confirm flag is not a substitute -- the same model that calls the
-  tool would set it. Such a tool also refuses to act unless an append-only
+  cannot be satisfied in one step. But requiring an exact id is NOT the same as
+  a human seeing it, and this file claimed otherwise until a live demo through
+  Claude Desktop disproved it: the model called b2_list_files itself, summarised
+  the file with name, size and date but never printed the id, and treated "go
+  ahead" as consent. The id requirement raises the MODEL's cost by one tool
+  call; only a confirmation the model cannot answer puts a human in the loop.
+  A confirm flag is not a substitute -- the same model that calls the
+  tool would set it, and a natural-language "go ahead" is that flag wearing
+  different clothes. See 011. Such a tool also refuses to act unless an append-only
   record can be written, and writes INTENT before acting and OUTCOME after,
   success or failure: a log that can miss events is not a log. From 006; see
   src/b2/delete.ts and src/audit-log.ts.
@@ -247,6 +266,21 @@ Never restate these rules inside a plan file — cite this section instead.
   first the shape of a dependency's errors, then the shape of its PERMISSIONS,
   now the shape of how it SPAWNS A PROCESS. Pin the version in the helper, and
   distrust any verification run through a tool that was silently upgraded.
+- Never design against a protocol capability without checking what the CLIENT
+  declares. Plan 011 was designed around FORM-mode MCP elicitation and
+  researched correctly against real SDK source, with line numbers -- and would
+  have thrown on every delete in Claude Desktop, which declares
+  `capabilities:{elicitation:{url:{}}}` (Claude.app/Contents/Resources/app.asar).
+  The SDK gates form mode on `.elicitation.form`
+  (sdk/dist/esm/server/index.js:351-352), and the preprocessor that rescues
+  spec-2025-06-18 clients declaring a bare `elicitation: {}` fires ONLY on an
+  empty object (types.js:335-345), so `{url:{}}` is never normalised. The design
+  would have failed closed 100% of the time in the one client where the bug it
+  fixes was found. Nothing in the SDK was misread; the SDK is not the client.
+  This is the same scar a FOURTH time -- first the shape of a dependency's
+  ERRORS, then its PERMISSIONS, then how it SPAWNS A PROCESS, now what the OTHER
+  END OF THE WIRE says it can do. Read the capability the peer actually
+  advertises, from its own binary if that is what it takes. From 011.
 
 ## Protected files
 
