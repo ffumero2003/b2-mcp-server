@@ -1,5 +1,21 @@
 # Plan 011 — human-confirmed deletion
 
+> STATUS: BLOCKED, and the mechanism below is DEAD. Do not implement it.
+> A throwaway probe server run against Claude Desktop showed it declares NO
+> elicitation capability at all -- not form, and not url either. It sends only
+> `extensions:{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}}`,
+> and `elicitInput` refused in 1ms before any wire traffic. The url-mode design
+> in this file was written from a `capabilities:{elicitation:{url:{}}}` string
+> found inside Claude.app/Contents/Resources/app.asar, which is NOT what the
+> client sends on the wire. See CLAUDE.md > What NOT to do.
+>
+> The DEFECT this plan describes is real and unfixed -- see Context. What needs
+> replacing is only the confirmation channel. Candidates under investigation:
+> the io.modelcontextprotocol/ui extension Desktop does declare, and Claude
+> Desktop's existing per-tool-call approval prompt if it displays arguments.
+> Everything below from Design onward assumes elicitation and is retained only
+> as the record of a design that was tested before it was built.
+
 ## Context
 
 Current state: see claude-plans/STATE.md.
@@ -52,6 +68,16 @@ three were the shape of a dependency's ERRORS (001), its PERMISSIONS (009), and
 how it SPAWNS A PROCESS (the inspector). This one is the shape of what the OTHER
 END OF THE WIRE declares it can do. Reading the SDK correctly was not enough;
 the SDK is not the client.
+
+AND THEN IT HAPPENED AGAIN, to the fix. The url-mode design above was written
+from that app.asar capability string. A probe server run against Claude Desktop
+showed the string is not what the client sends: the live handshake carries no
+elicitation capability at all, only the io.modelcontextprotocol/ui extension.
+Reading the app's BINARY was not enough either; a bundle is not a handshake.
+The lesson compounds rather than repeating -- each time, the thing that felt
+like ground truth was one layer too far from the wire. Only the initialize
+handshake is authoritative, and the probe that establishes it costs twenty
+minutes against a plan's worth of design.
 
 **Decisions (confirmed with the user):**
 

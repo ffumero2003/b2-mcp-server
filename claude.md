@@ -172,6 +172,19 @@ Never restate these rules inside a plan file — cite this section instead.
   refused" from "the tool was never called". A model declining is not a guard
   firing, and a refusal you did not cause proves nothing about the code. Drive
   the guard directly, through a client that shows you the arguments.
+- The fence is now also VERIFIED through Claude Desktop, and how it got there is
+  the point. TWO natural-language attempts never reached the tool at all: the
+  model refused /etc/passwd as "a system file", then refused an absolute path
+  with "I don't have access to your local machine's filesystem". The guard ran
+  only on the THIRD attempt, which named the tool, used a relative escape, and
+  told the model to expect failure and quote the output verbatim --
+  `Path is outside the permitted directory: ../README.md`. The model's own
+  judgment is the FIRST line of defense and the fence is the SECOND, so the
+  fence fires only where the first is bypassed: a different client, different
+  priors, or prompt injection. That is simultaneously the case that matters most
+  and the one never observed by accident. Test a guard by naming the tool and
+  forcing the call. A natural-language request measures the MODEL, not the code,
+  and passes for the wrong reason.
 
   
 ## Rules
@@ -279,8 +292,19 @@ Never restate these rules inside a plan file — cite this section instead.
   fixes was found. Nothing in the SDK was misread; the SDK is not the client.
   This is the same scar a FOURTH time -- first the shape of a dependency's
   ERRORS, then its PERMISSIONS, then how it SPAWNS A PROCESS, now what the OTHER
-  END OF THE WIRE says it can do. Read the capability the peer actually
-  advertises, from its own binary if that is what it takes. From 011.
+  END OF THE WIRE says it can do.
+  The ONLY authoritative source is the INITIALIZE HANDSHAKE. Grepping the peer's
+  binary is not a substitute and actively misled this project: app.asar contains
+  `capabilities:{elicitation:{url:{}}}`, and Claude Desktop nonetheless declares
+  NO elicitation capability whatsoever on the wire -- it sends only
+  `extensions:{"io.modelcontextprotocol/ui":{...}}`, and the SDK's gate refused
+  in 1ms. A string in a bundle proves code EXISTS somewhere in that app, not
+  that this client sends it on this connection. So url mode was as dead as form
+  mode, and the second design died the same way the first did, one rung further
+  down. When a design depends on a peer capability, spend twenty minutes on a
+  throwaway probe server that reports getClientCapabilities() AND calls the
+  thing for real, BEFORE writing the plan that assumes it. The probe is cheap;
+  the plan written on an assumption is not. From 011.
 
 ## Protected files
 
